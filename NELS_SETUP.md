@@ -1,54 +1,74 @@
 # NeLS Storage Setup
 
 This project uses [NeLS storage](https://nels-docs.readthedocs.io/en/latest/index.html)
-to share data files. Raw and intermediate data live in the NeLS folder
-`~/Projects/NMBU_threeD_Sandve_2024/Mucor` and are synchronized with the local
-`data/` directory in this repository.
+to share data files. The NeLS remote folder
+`~/Projects/NMBU_threeD_Sandve_2024/Mucor/data` maps to the local `data/`
+directory in this repository.
+
+Data files are **not** downloaded wholesale. Instead, each analysis provides a
+`download_data.sh` script that fetches only the files it needs (see
+[Downloading data for an analysis](#4-downloading-data-for-an-analysis)).
+
+---
 
 ## 1. Get your credentials from the NeLS portal
 
-Log in to <https://nels.bioinfo.no/> and open **My Profile**. From there,
-download:
+Log in to <https://nels.bioinfo.no/> and open **My Profile**.
 
-- your **SSH private key** (e.g. `nels-userkey-XXXX.txt`)
-- the suggested **SSH config snippet** (shown on the same page)
-- your NeLS **username** (note that it is *not* your FEIDE ID)
+**SSH key** — find the *SSH Private Key* section and click **Download Key**.
+The file will be named `<username>.key` (e.g. `u15b2.key`). The portal also
+shows the exact `chmod` command to run:
 
-NeLS uses a jump host (`login.nels.elixir.no`) in front of the storage host
-(`data.nels.elixir.no`), so two hops are required for every connection.
+```
+chmod 600 <username>.key
+```
+
+**SSH config** — find the *Example usage 2* section. It shows a ready-made
+`~/.ssh/config` snippet (see step 3 below).
+
+**Username** — your NeLS username is shown throughout that
+page. Note it differs from your FEIDE/institutional login.
+
+---
 
 ## 2. Install the SSH key
 
-Move the key into your `~/.ssh/` directory and lock down the permissions:
+Move the downloaded key into `~/.ssh/` and set permissions:
 
 ```bash
 mkdir -p ~/.ssh
-mv ~/Downloads/nels-userkey-*.txt ~/.ssh/nels_key
-chmod 600 ~/.ssh/nels_key
+mv ~/Downloads/<username>.key ~/.ssh/<username>.key
+chmod 600 ~/.ssh/<username>.key
 ```
+
+---
 
 ## 3. Add the SSH config
 
 Open `~/.ssh/config` (create it if it does not exist) and paste the snippet
-from the NeLS portal. It should look roughly like this — replace
-`<username>` with your NeLS username:
+from the *Example usage 2* section on your **My Profile** page. It will look
+like this (with your actual username substituted):
 
 ```sshconfig
-Host nels-login
-    HostName login.nels.elixir.no
-    User <username>
-    IdentityFile ~/.ssh/nels_key
-    IdentitiesOnly yes
+## SSH gateway to nels-storage
+Host nels.bastion
+        HostName login.nels.elixir.no
+        User <username>
+        IdentityFile ~/.ssh/<username>.key
+        ForwardAgent no
+        IdentitiesOnly yes
 
-Host nels
-    HostName data.nels.elixir.no
-    User <username>
-    IdentityFile ~/.ssh/nels_key
-    IdentitiesOnly yes
-    ProxyJump nels-login
+## nels-storage host
+Host nels.storage
+        User <username>
+        HostName data.nels.elixir.no
+        IdentityFile ~/.ssh/<username>.key
+        ProxyJump nels.bastion
+        ForwardAgent no
+        IdentitiesOnly yes
 ```
 
-Set the permissions on the config file:
+Set permissions on the config file:
 
 ```bash
 chmod 600 ~/.ssh/config
@@ -57,52 +77,37 @@ chmod 600 ~/.ssh/config
 Verify the connection:
 
 ```bash
-ssh nels
+ssh nels.storage
 ```
 
-You should land in your NeLS home directory (`/nels/users/<username>`). Exit
-with `Ctrl-D`.
+You should land in your NeLS home directory. Exit with `Ctrl-D`.
 
-## 4. Synchronize `data/` with NeLS
+---
 
-The shared data lives at `~/Projects/NMBU_threeD_Sandve_2024/Mucor` on NeLS
-and mirrors to `data/` in this repository.
+## 4. Downloading data for an analysis
 
-Make sure the local target exists:
+Each analysis directory under `analysis/` contains a `download_data.sh` script
+that lists the files it needs and delegates to the shared helper
+`scripts/nels_download.sh`.
+
+To download data for, say, the synteny analysis:
 
 ```bash
-mkdir -p data
+bash analysis/synteny/download_data.sh
 ```
 
-### Download (NeLS → local)
+Files are written to `data/<analysis>/...` relative to the repository root.
+The `data/` directory is listed in `.gitignore` — data files are never
+committed to the repository.
+
+### Uploading results back to NeLS
+
+After generating results you want to share, upload them with:
 
 ```bash
-rsync -avh --progress nels:Projects/NMBU_threeD_Sandve_2024/Mucor/ data/
+rsync -avh --progress data/<analysis>/ \
+    nels.storage:Projects/NMBU_threeD_Sandve_2024/Mucor/data/<analysis>/
 ```
 
-### Upload (local → NeLS)
+Add `-n` (`--dry-run`) to preview changes first.
 
-```bash
-rsync -avh --progress data/ nels:Projects/NMBU_threeD_Sandve_2024/Mucor/
-```
-
-The trailing slashes matter: with them, the *contents* of the source folder
-are copied into the destination folder.
-
-Add `-n` (`--dry-run`) to preview changes before running for real, and
-`--delete` if you want the destination to exactly mirror the source (removes
-files that no longer exist on the source side — use with care).
-
-### Interactive browsing
-
-For one-off file operations you can also use `sftp`:
-
-```bash
-sftp nels
-sftp> cd Projects/NMBU_threeD_Sandve_2024/Mucor
-sftp> ls
-```
-
-Graphical clients such as FileZilla or Cyberduck work too — point them at
-`data.nels.elixir.no`, set the jump host to `login.nels.elixir.no`, and use
-the same private key.
