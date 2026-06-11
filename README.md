@@ -1,6 +1,6 @@
 # Mucoromycota Genomes Paper
 
-Scripts and analyses for a comparative genomics paper on Mucoromycota fungi genomes.
+Scripts and analyses for our comparative genomics paper on Mucoromycota fungi genomes.
 
 ## Repository structure
 
