@@ -1,0 +1,6 @@
+# Figure 1 Draft Legend
+
+**Figure 1. Comparative genomic overview of the Mucoromycota species set.**
+Time-calibrated phylogeny of the 61 genomes included in the final core comparative analyses, with newly generated genomes shown in bold and public/reference genomes shown in regular type. Background shading indicates major orders, and Mucorales families are annotated on the tree. The displayed time axis is shown in millions of years ago; the current plotting script applies a 0.5 scale factor to the final dated tree branch lengths pending confirmation of the final calibration units.
+
+Panels show: **A.** genome assembly size in Mb; **B.** repeat composition as the percentage of bases annotated as DNA transposons, retroelements, other repeats, or unknown repeats; **C.** total number of annotated genes; **D.** percentage of genes assigned to OrthoFinder orthogroups; **E.** number of species-specific orthogroups; **F.** current evidence category for sexual reproduction, simplified as yes, no, or unknown for the main figure; and **G.** currently curated ecological lifestyle. OrthoFinder statistics are from the final Results_May21_4 run. Sexual reproduction and lifestyle categories are preliminary and will be expanded in supplementary tables with supporting evidence, including literature reports and MAT locus annotations where available.

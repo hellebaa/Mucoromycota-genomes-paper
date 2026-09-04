@@ -1,0 +1,7 @@
+query_id	gene_symbol	mating_type	description
+ACH92694.1	tptA	plus	triose phosphate transporter, Mucor circinelloides plus allele
+ACH92691.1	tptA	minus	triose phosphate transporter, Mucor circinelloides minus allele
+ACH92695.1	sexP	plus	HMG-domain sex determinant, Mucor circinelloides plus allele
+ACH92692.1	sexM	minus	HMG-domain sex determinant, Mucor circinelloides minus allele
+ACH92696.1	rnhA	plus	RNA helicase, Mucor circinelloides plus allele
+ACH92693.1	rnhA	minus	RNA helicase, Mucor circinelloides minus allele

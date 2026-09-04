@@ -1,0 +1,3 @@
+query_id	evidence_track	pathway	gene_symbol	source_species	accession	accession_type	sequence_source	priority_tier	use_for_mat_calling	notes	reference
+CAA98021.1	sex_pathway	trisporoid_biosynthesis	tdh/TSP1	Mucor mucedo	CAA98021.1	protein	external_protein_accession	1	no	4-dihydromethyltrisporate dehydrogenase; sex hormone/trisporoid pathway marker, not MAT-locus evidence.	Czempinski et al. 1996
+CAP72566.1	sex_pathway	trisporoid_biosynthesis	TSP2	Mucor mucedo	CAP72566.1	protein	external_protein_accession	2	no	4-dihydrotrisporin dehydrogenase; additional trisporoid-pathway marker, not MAT-locus evidence.	Burmester et al. 2009

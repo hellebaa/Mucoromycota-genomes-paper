@@ -1,0 +1,606 @@
+---
+title: "Mucoromycota overview figure"
+author: "Helle Tessand Baalsrud"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries}
+library(ape)
+library(ggtree)
+library(tidyverse)
+library(scales)
+library(phytools)
+library(aplot)
+```
+
+```{r paths-and-options}
+first_existing <- function(paths) {
+  hit <- paths[file.exists(paths)]
+  if (length(hit) == 0) {
+    stop("None of these paths exist:\n", paste(paths, collapse = "\n"))
+  }
+  hit[[1]]
+}
+
+TREE_FILE <- first_existing(c(
+  "data/phylogeny/sco_cds_b500.date.nwk",
+  "/Users/hellebaalsrud/Documents/Scripts/github/Mucoromycota-genomes-paper/data/phylogeny/sco_cds_b500.date.nwk"
+))
+
+METADATA_DIR <- "/Users/hellebaalsrud/Documents/Projects/Mucormycota_NeLS_staging/data/metadata"
+MASTER_METADATA_FILE <- file.path(METADATA_DIR, "genome_metadata_master.csv")
+ASSEMBLY_QC_FILE <- file.path(METADATA_DIR, "assembly_qc_summary.csv")
+REPEAT_FILE <- "/Users/hellebaalsrud/Documents/Projects/Mucormycota/Repeats/denovo_repeats_analyses/repeat_summary_table.tsv"
+FIGURE_DIR <- "/Users/hellebaalsrud/Documents/Projects/Mucormycota/Figures"
+TREE_TIME_SCALE <- 0.5
+TIME_BAND_MA <- 100
+
+# Set this to the final OrthoFinder
+# Comparative_Genomics_Statistics/Statistics_PerSpecies.tsv file when confirmed.
+GENE_STATS_FILE <- first_existing(c(
+  "data/orthofinder/results/Comparative_Genomics_Statistics/Statistics_PerSpecies.tsv",
+  "/Users/hellebaalsrud/Documents/Scripts/github/Mucoromycota-genomes-paper/data/orthofinder/results/Comparative_Genomics_Statistics/Statistics_PerSpecies.tsv"
+))
+
+# Default figure-1 draft: keep the old genome/repeat overview, remove GC,
+# and add OrthoFinder + biological curation panels.
+SHOW_PANELS <- c(
+  "genome_size",
+  "repeats",
+  "of_genes",
+  "of_orthogroup_percent",
+  "of_species_specific",
+  "sexual_reproduction",
+  "lifestyle"
+)
+
+OUTPUT_PDF <- file.path(FIGURE_DIR, "Mucoromycota_phylogeny_overview_Fig1_draft_MucCirc3.pdf")
+OUTPUT_MISSING <- file.path(FIGURE_DIR, "Mucoromycota_phylogeny_overview_missing_metrics.tsv")
+```
+
+```{r read-and-curate-inputs}
+tree <- read.tree(TREE_FILE)
+
+metadata <- read_csv(MASTER_METADATA_FILE, show_col_types = FALSE) %>%
+  filter(include_final_ultrametric_tree == "yes", include_core_analyses == "yes") %>%
+  transmute(
+    genome_id,
+    tree_label,
+    species_name,
+    family,
+    order,
+    source,
+    annotation_source,
+    lifestyle,
+    dimorphic,
+    sexual_reproduction,
+    mat_locus
+  )
+
+confirmed_alias_map <- tribble(
+  ~assembly_stats_id, ~genome_id,
+  "Dissophora_globulifera_1448", "gzDisGlob2",
+  "Mucor_flavus_VKMF1003", "gzMucFlav2",
+  "Mucor_flavus_VKMF1097", "gzMucFlav3",
+  "Mucor_flavus_VKMF1110", "gzMucFlav4",
+  "Mucor_fragilis_CMMF236", "gzMucFrag2",
+  "Mucor_fragilis_U113030", "gzMucFrag3",
+  "Mucor_plumbeus_2412", "gzMucPlum3",
+  "Mucor_plumbeus_4808", "gzMucPlum4",
+  "Mucor_plumbeus_CCMF443", "gzMucPlum5",
+  "Mucor_plumbeus_UBOCC208", "gzMucPlum6",
+  "Mucor_plumbeus_UBOCC210", "gzMucPlum7"
+)
+
+assembly_qc <- read_csv(ASSEMBLY_QC_FILE, show_col_types = FALSE) %>%
+  left_join(confirmed_alias_map, by = "assembly_stats_id", suffix = c("", "_confirmed")) %>%
+  mutate(
+    genome_id = coalesce(genome_id_confirmed, genome_id, possible_genome_id),
+    Busco_single_copy_part = pmax(Busco - Busco_Dup, 0)
+  ) %>%
+  select(
+    genome_id,
+    nbContig,
+    totalLength_MB,
+    N50_MB,
+    GC,
+    Busco,
+    Busco_Dup,
+    Busco_single_copy_part
+  )
+
+repeat_summary <- read_tsv(REPEAT_FILE, show_col_types = FALSE) %>%
+  distinct(Species, .keep_all = TRUE) %>%
+  transmute(
+    genome_id = Species,
+    GenomeSizeMb_repeat = Total_length_bp / 1e6,
+    GC_percent_repeat = GC_percent,
+    Retroelements = Retroelements_percent,
+    DNA = DNA_transposons_percent + Rolling_circles_percent,
+    Unknown = Unclassified_percent,
+    Other = Other_percent,
+    TotalRepeat = Bases_masked_percent
+  )
+```
+
+```{r optional-orthofinder-stats}
+read_orthofinder_species_stats <- function(path) {
+  if (is.na(path) || !file.exists(path)) {
+    return(tibble(
+      genome_id = character(),
+      NumberGenes = numeric(),
+      GenesInOrthogroups = numeric(),
+      UnassignedGenes = numeric(),
+      PercentGenesInOrthogroups = numeric(),
+      SpeciesSpecificOrthogroups = numeric(),
+      SpeciesSpecificGenes = numeric()
+    ))
+  }
+
+  raw <- read_tsv(path, show_col_types = FALSE, col_names = TRUE)
+  stat_col <- names(raw)[[1]]
+
+  raw %>%
+    filter(.data[[stat_col]] %in% c(
+      "Number of genes",
+      "Number of genes in orthogroups",
+      "Number of unassigned genes",
+      "Percentage of genes in orthogroups",
+      "Number of species-specific orthogroups",
+      "Number of genes in species-specific orthogroups"
+    )) %>%
+    pivot_longer(
+      cols = -all_of(stat_col),
+      names_to = "genome_id",
+      values_to = "value"
+    ) %>%
+    mutate(
+      genome_id = genome_id %>%
+        str_remove("\\.proteins$") %>%
+        str_remove("\\.ncbi\\.pep$") %>%
+        str_remove("\\.pep$") %>%
+        str_remove("_prot$") %>%
+        recode(EntParv = "EntParv1"),
+      value = as.numeric(value),
+      statistic = recode(
+        .data[[stat_col]],
+        "Number of genes" = "NumberGenes",
+        "Number of genes in orthogroups" = "GenesInOrthogroups",
+        "Number of unassigned genes" = "UnassignedGenes",
+        "Percentage of genes in orthogroups" = "PercentGenesInOrthogroups",
+        "Number of species-specific orthogroups" = "SpeciesSpecificOrthogroups",
+        "Number of genes in species-specific orthogroups" = "SpeciesSpecificGenes"
+      )
+    ) %>%
+    select(genome_id, statistic, value) %>%
+    pivot_wider(names_from = statistic, values_from = value)
+}
+
+orthofinder_stats <- read_orthofinder_species_stats(GENE_STATS_FILE)
+```
+
+```{r combine-data}
+overview <- tibble(tree_label = tree$tip.label) %>%
+  left_join(metadata, by = "tree_label") %>%
+  mutate(genome_id = coalesce(genome_id, tree_label)) %>%
+  left_join(assembly_qc, by = "genome_id") %>%
+  left_join(repeat_summary, by = "genome_id") %>%
+  left_join(orthofinder_stats, by = "genome_id") %>%
+  mutate(
+    GenomeSizeMb = coalesce(totalLength_MB, GenomeSizeMb_repeat),
+    GC_percent = coalesce(GC * 100, GC_percent_repeat),
+    GenomeSet = case_when(
+      source == "EBPNOR" ~ "new genome",
+      source == "Other" ~ "public/reference",
+      is.na(source) ~ "unknown",
+      TRUE ~ source
+    ),
+    TipFace = if_else(GenomeSet == "new genome", "bold", "plain"),
+    SexualReproduction = case_when(
+      is.na(sexual_reproduction) | sexual_reproduction == "" ~ "unknown",
+      str_to_lower(sexual_reproduction) == "yes" ~ "Yes",
+      str_to_lower(sexual_reproduction) == "no" ~ "No",
+      TRUE ~ "unknown"
+    ),
+    MatLocus = case_when(
+      is.na(mat_locus) | mat_locus == "" ~ "unknown",
+      TRUE ~ mat_locus
+    ),
+    Lifestyle = case_when(
+      is.na(lifestyle) | lifestyle == "" ~ "unknown",
+      TRUE ~ lifestyle
+    ),
+    Family = case_when(
+      is.na(family) | family == "" ~ "unknown",
+      TRUE ~ family
+    ),
+    Order = case_when(
+      is.na(order) | order == "" ~ "unknown",
+      TRUE ~ order
+    )
+  )
+
+stopifnot("MucCirc3" %in% tree$tip.label)
+
+missing_metrics <- overview %>%
+  transmute(
+    tree_label,
+    genome_id,
+    missing_genome_size = is.na(GenomeSizeMb),
+    missing_repeats = is.na(TotalRepeat),
+    missing_of_gene_count = is.na(NumberGenes),
+    missing_of_percent_genes_in_orthogroups = is.na(PercentGenesInOrthogroups),
+    missing_of_species_specific_orthogroups = is.na(SpeciesSpecificOrthogroups),
+    missing_sexual_reproduction = SexualReproduction == "unknown",
+    missing_mat_locus = MatLocus == "unknown",
+    missing_lifestyle = Lifestyle == "unknown"
+  ) %>%
+  filter(if_any(starts_with("missing_"), identity))
+
+write_tsv(missing_metrics, OUTPUT_MISSING)
+missing_metrics
+```
+
+```{r tree-order-and-backgrounds}
+max_time <- max(nodeHeights(tree))
+max_time_ma <- max_time * TREE_TIME_SCALE
+
+base_tree <- ggtree(tree) +
+  theme_tree2()
+
+tip_order <- base_tree$data %>%
+  filter(isTip) %>%
+  arrange(y)
+
+species_levels <- tip_order$label
+
+overview <- overview %>%
+  mutate(Species = factor(tree_label, levels = species_levels))
+
+tip_annotation <- tip_order %>%
+  select(tree_label = label, y) %>%
+  left_join(overview, by = "tree_label")
+
+group_ranges <- tip_annotation %>%
+  filter(!is.na(Order), Order != "unknown") %>%
+  group_by(Order) %>%
+  summarise(
+    ymin = min(y) - 0.5,
+    ymax = max(y) + 0.5,
+    ymid = mean(range(y)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    fill = recode(
+      Order,
+      Mucorales = "#F5DDD6",
+      Umbelopsidales = "#F9E8AF",
+      Mortierellales = "#D8E6F6",
+      .default = "#F1F1F1"
+    ),
+    label_color = recode(
+      Order,
+      Mucorales = "#8B2E2E",
+      Umbelopsidales = "#D88922",
+      Mortierellales = "#4A77BF",
+      .default = "#555555"
+    )
+  )
+
+family_ranges <- tip_annotation %>%
+  filter(!is.na(Family), Family != "unknown") %>%
+  group_by(Order, Family) %>%
+  summarise(
+    ymin = min(y) - 0.5,
+    ymax = max(y) + 0.5,
+    ymid = mean(range(y)),
+    n_tips = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    label_color = recode(
+      Order,
+      Mucorales = "#8B2E2E",
+      Umbelopsidales = "#D88922",
+      Mortierellales = "#4A77BF",
+      .default = "#555555"
+    )
+  )
+
+time_bands <- tibble(
+  xmin = seq(0, max_time, by = TIME_BAND_MA / TREE_TIME_SCALE),
+  xmax = pmin(xmin + TIME_BAND_MA / TREE_TIME_SCALE, max_time)
+) %>%
+  mutate(band_id = seq_along(xmin)) %>%
+  filter(band_id %% 2 == 1)
+
+add_order_bands <- function(p) {
+  p +
+    geom_rect(
+      data = group_ranges,
+      aes(ymin = ymin, ymax = ymax),
+      xmin = -Inf,
+      xmax = Inf,
+      inherit.aes = FALSE,
+      fill = group_ranges$fill,
+      alpha = 0.65
+    )
+}
+```
+
+```{r tree-panel}
+p_tree <- base_tree %<+% overview +
+  geom_rect(
+    data = time_bands,
+    aes(xmin = xmin, xmax = xmax),
+    ymin = -Inf,
+    ymax = Inf,
+    inherit.aes = FALSE,
+    fill = "#EEF0EF",
+    alpha = 0.9
+  ) +
+  geom_rect(
+    data = group_ranges,
+    aes(ymin = ymin, ymax = ymax),
+    xmin = -Inf,
+    xmax = Inf,
+    inherit.aes = FALSE,
+    fill = group_ranges$fill,
+    alpha = 0.45
+  ) +
+  geom_tree(linewidth = 0.35) +
+  geom_tiplab(
+    aes(fontface = TipFace),
+    align = TRUE,
+    linesize = 0.2,
+    size = 2.7,
+    offset = 0.02
+  ) +
+  geom_text(
+    data = group_ranges,
+    aes(x = max_time * -0.75, y = ymid, label = Order, color = Order),
+    inherit.aes = FALSE,
+    fontface = "bold",
+    size = 4.4,
+    hjust = 0
+  ) +
+  geom_text(
+    data = family_ranges %>% filter(Order == "Mucorales", n_tips >= 2),
+    aes(x = max_time * -0.08, y = ymid, label = Family, color = Order),
+    inherit.aes = FALSE,
+    size = 3,
+    hjust = 0,
+    check_overlap = TRUE
+  ) +
+  scale_color_manual(
+    values = setNames(group_ranges$label_color, group_ranges$Order),
+    guide = "none"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, max_time, by = TIME_BAND_MA / TREE_TIME_SCALE),
+    labels = function(x) round((max_time - x) * TREE_TIME_SCALE)
+  ) +
+  coord_cartesian(xlim = c(max_time * -0.8, max_time * 1.35), clip = "off") +
+  theme(
+    plot.margin = margin(5.5, 120, 5.5, 5.5),
+    axis.title.x = element_blank()
+  )
+
+p_tree
+```
+
+```{r panel-helpers}
+theme_side_panel <- function() {
+  theme_bw(base_size = 9) +
+    theme(
+      axis.title.y = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(),
+      plot.margin = margin(5.5, 5.5, 5.5, 5.5)
+    )
+}
+
+make_bar_panel <- function(data, x_col, x_label, fill = "#5D4E49") {
+  add_order_bands(
+    ggplot(data, aes(x = .data[[x_col]], y = Species))
+  ) +
+    geom_col(fill = fill, na.rm = TRUE) +
+    labs(x = x_label, y = NULL) +
+    theme_side_panel()
+}
+
+make_tile_panel <- function(data, fill_col, x_label, values) {
+  add_order_bands(
+    ggplot(data, aes(x = x_label, y = Species, fill = .data[[fill_col]]))
+  ) +
+    geom_tile(width = 0.9, height = 0.8) +
+    scale_fill_manual(values = values, na.value = "white") +
+    labs(x = x_label, y = NULL, fill = x_label) +
+    theme_side_panel() +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.position = "bottom"
+    )
+}
+```
+
+```{r panels}
+p_genome <- make_bar_panel(overview, "GenomeSizeMb", "A. Genome size (Mb)", "#5D4E49")
+
+repeat_long <- overview %>%
+  transmute(
+    Species,
+    DNA,
+    Retroelements,
+    Other,
+    Unknown
+  ) %>%
+  pivot_longer(
+    cols = -Species,
+    names_to = "RepeatType",
+    values_to = "Percent"
+  ) %>%
+  mutate(
+    RepeatType = factor(
+      RepeatType,
+      levels = c("DNA", "Retroelements", "Other", "Unknown")
+    )
+  )
+
+p_repeat <- add_order_bands(
+  ggplot(repeat_long, aes(x = Percent, y = Species, fill = RepeatType))
+) +
+  geom_col(position = "stack", na.rm = TRUE) +
+  scale_fill_manual(
+    values = c(
+      DNA = "#305141",
+      Retroelements = "#7eba78",
+      Other = "#d1f9a6",
+      Unknown = "#A49B93"
+    )
+  ) +
+  labs(x = "B. Repeats (%)", y = NULL, fill = NULL) +
+  theme_side_panel() +
+  theme(legend.position = "bottom")
+
+p_of_genes <- make_bar_panel(overview, "NumberGenes", "C. Genes", "#5D4E49")
+
+p_of_orthogroup_percent <- make_bar_panel(
+  overview,
+  "PercentGenesInOrthogroups",
+  "D. Genes in OGs (%)",
+  "#5D4E49"
+) +
+  scale_x_continuous(limits = c(0, 100), expand = expansion(mult = c(0, 0.02)))
+
+p_of_species_specific <- make_bar_panel(
+  overview,
+  "SpeciesSpecificOrthogroups",
+  "E. Species-specific OGs",
+  "#5D4E49"
+)
+
+p_sex <- make_tile_panel(
+  overview,
+  "SexualReproduction",
+  "F. Sex",
+  c(
+    Yes = "#7B4AB8",
+    No = "#111111",
+    unknown = "#D7DEE8"
+  )
+)
+
+p_mat <- make_tile_panel(
+  overview,
+  "MatLocus",
+  "MAT",
+  c(
+    `putatively functional` = "#305141",
+    present = "#7eba78",
+    partial = "#C9B46A",
+    absent = "#A49B93",
+    unknown = "#D7DEE8"
+  )
+)
+
+p_lifestyle <- make_tile_panel(
+  overview,
+  "Lifestyle",
+  "G. Ecology",
+  c(
+    saprotrophic = "#426A5A",
+    `saprotrophic, endophyte` = "#6B7F44",
+    `saprotrophic, opportunisitc pathogen` = "#9C6644",
+    `saprotrophic, opportunisitc pathogen plants` = "#8B7E4B",
+    fermentation = "#7C5E99",
+    Pathogen = "#8A5A76",
+    `Opportunistic pathogen` = "#B46A55",
+    `arbuscular mycorrhizal` = "#4D7C7B",
+    unknown = "#D7DEE8"
+  )
+)
+```
+
+```{r assemble-main-figure}
+panel_lookup <- list(
+  genome_size = p_genome,
+  repeats = p_repeat,
+  of_genes = p_of_genes,
+  of_orthogroup_percent = p_of_orthogroup_percent,
+  of_species_specific = p_of_species_specific,
+  sexual_reproduction = p_sex,
+  mat_locus = p_mat,
+  lifestyle = p_lifestyle
+)
+
+panel_widths <- c(
+  genome_size = 1,
+  repeats = 1.2,
+  of_genes = 1,
+  of_orthogroup_percent = 1,
+  of_species_specific = 1,
+  sexual_reproduction = 0.32,
+  mat_locus = 0.55,
+  lifestyle = 0.32
+)
+
+final_plot <- panel_lookup[[SHOW_PANELS[[1]]]] %>%
+  insert_left(p_tree, width = 2.7)
+
+for (panel_name in SHOW_PANELS[-1]) {
+  final_plot <- final_plot %>%
+    insert_right(panel_lookup[[panel_name]], width = panel_widths[[panel_name]])
+}
+
+final_plot
+
+ggsave(
+  OUTPUT_PDF,
+  final_plot,
+  width = 18,
+  height = 12
+)
+```
+
+```{r supporting-correlation}
+repeat_correlation <- overview %>%
+  filter(!is.na(GenomeSizeMb), !is.na(TotalRepeat))
+
+lm_repeat <- lm(TotalRepeat ~ GenomeSizeMb, data = repeat_correlation)
+
+p_correlation <- ggplot(
+  repeat_correlation,
+  aes(x = GenomeSizeMb, y = TotalRepeat)
+) +
+  geom_point(size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "black") +
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    hjust = 1.1,
+    vjust = 1.5,
+    label = paste0(
+      "Slope = ", round(coef(lm_repeat)[2], 3),
+      "\nR2 = ", round(summary(lm_repeat)$r.squared, 2),
+      "\nP = ", signif(coef(summary(lm_repeat))[2, 4], 2)
+    ),
+    size = 4
+  ) +
+  labs(
+    x = "Genome size (Mb)",
+    y = "Repeat content (%)"
+  ) +
+  theme_bw()
+
+p_correlation
+```

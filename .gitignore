@@ -1,3 +1,12 @@
 data/
 .Rproj.user
 *.Rproj
+outputs/
+**/__pycache__/
+*.py[cod]
+.DS_Store
+~$*
+analysis/mat_locus/queries/*.fa
+analysis/mat_locus/queries/*.faa
+analysis/mat_locus/queries/*.fasta
+analysis/mat_locus/queries/*.fna

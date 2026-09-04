@@ -1,0 +1,5 @@
+motif	label	notes
+TTAGGG	canonical_TTAGGG	Canonical sequence detected at contig ends in MucCirc1/MucCirc2 and used in the first pass.
+TTTAGGG	fungal_TTTAGGG	Common fungal telomere-repeat variant reported in multiple fungal lineages.
+TTAGG	short_TTAGG	Shorter TTAGG-like variant; exploratory.
+TTGGGG	plant_like_TTGGGG	Exploratory plant-like variant reported outside fungi; keep separate from main interpretation.
