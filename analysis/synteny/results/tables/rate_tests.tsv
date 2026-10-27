@@ -1,0 +1,217 @@
+genome_set	index	divergence	model	comparison	median_p	frac_draws_p05	n_draws	scale	label	primary
+all	corr_index_norm	d_prot	exponential	Mucorales > Mortierellales	0.0011434223699813971	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.018095904429457455	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.6643133797295637	0	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_prot	stretched	Mucorales > Mortierellales	0.0011434223699813971	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.018095904429457455	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.6643133797295637	0	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_sub	exponential	Mucorales > Mortierellales	8.331107355936935e-4	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.012570396076329399	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.6643133797295637	0	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_sub	stretched	Mucorales > Mortierellales	0.0011434223699813971	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.018095904429457455	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.6643133797295637	0	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_time	exponential	Mucorales > Mortierellales	0.0011434223699813971	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_time	exponential	Mucorales > Umbelopsidales	0.012570396076329399	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.6643133797295637	0	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_time	stretched	Mucorales > Mortierellales	0.0011434223699813971	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_time	stretched	Mucorales > Umbelopsidales	0.018095904429457455	1	1000	meso	Correlation index	FALSE
+all	corr_index_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.6643133797295637	0	1000	meso	Correlation index	FALSE
+all	goc1_intra_norm	d_prot	exponential	Mucorales > Mortierellales	0.013868838196778767	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.9652357727734714	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_prot	stretched	Mucorales > Mortierellales	0.027428891995054827	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.9652357727734714	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_sub	exponential	Mucorales > Mortierellales	0.010877018520772474	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.9652357727734714	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_sub	stretched	Mucorales > Mortierellales	0.010877018520772474	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.9652357727734714	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_time	exponential	Mucorales > Mortierellales	0.010877018520772474	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_time	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.9652357727734714	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_time	stretched	Mucorales > Mortierellales	0.010877018520772474	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_time	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc1_intra_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.9652357727734714	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+all	goc_intra_norm	d_prot	exponential	Mucorales > Mortierellales	0.010877018520772474	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.9401089606773934	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_prot	stretched	Mucorales > Mortierellales	0.027428891995054827	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.9025824261284748	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_sub	exponential	Mucorales > Mortierellales	0.008463401545968308	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.9401089606773934	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_sub	stretched	Mucorales > Mortierellales	0.008463401545968308	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.9401089606773934	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_time	exponential	Mucorales > Mortierellales	0.013868838196778767	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_time	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.9401089606773934	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_time	stretched	Mucorales > Mortierellales	0.013868838196778767	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_time	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	goc_intra_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.9401089606773934	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+all	same_chr	d_prot	exponential	Mucorales > Mortierellales	0.21298755575680273	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_prot	exponential	Mucorales > Umbelopsidales	0.01817927658639535	1	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_prot	exponential	Umbelopsidales > Mortierellales	0.9533550219081977	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_prot	stretched	Mucorales > Mortierellales	0.5186753579351451	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_prot	stretched	Mucorales > Umbelopsidales	0.008619510279295485	1	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_prot	stretched	Umbelopsidales > Mortierellales	0.9533550219081977	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_sub	exponential	Mucorales > Mortierellales	0.21298755575680273	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_sub	exponential	Mucorales > Umbelopsidales	0.01817927658639535	1	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_sub	exponential	Umbelopsidales > Mortierellales	0.9533550219081977	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_sub	stretched	Mucorales > Mortierellales	0.3715295404175922	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_sub	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_sub	stretched	Umbelopsidales > Mortierellales	0.9533550219081977	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_time	exponential	Mucorales > Mortierellales	0.27133487826853553	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_time	exponential	Mucorales > Umbelopsidales	0.01817927658639535	1	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_time	exponential	Umbelopsidales > Mortierellales	0.9533550219081977	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_time	stretched	Mucorales > Mortierellales	0.40743564194935555	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_time	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	macro	Neighbours on the same chromosome	FALSE
+all	same_chr	d_time	stretched	Umbelopsidales > Mortierellales	0.9533550219081977	0	1000	macro	Neighbours on the same chromosome	FALSE
+all	strand_index_norm	d_prot	exponential	Mucorales > Mortierellales	6.127244710124823e-4	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.6531796891081207	0	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_prot	stretched	Mucorales > Mortierellales	8.470989349062402e-4	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.6531796891081207	0	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_sub	exponential	Mucorales > Mortierellales	4.395677353765326e-4	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_sub	stretched	Mucorales > Mortierellales	4.395677353765326e-4	1	1000	meso	Strand randomisation index	TRUE
+all	strand_index_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Strand randomisation index	TRUE
+all	strand_index_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.7442591102752237	0	1000	meso	Strand randomisation index	TRUE
+all	strand_index_norm	d_time	exponential	Mucorales > Mortierellales	6.127244710124823e-4	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_time	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_time	stretched	Mucorales > Mortierellales	4.395677353765326e-4	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_time	stretched	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Strand randomisation index	FALSE
+all	strand_index_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.7442591102752237	0	1000	meso	Strand randomisation index	FALSE
+all	tau_index_norm	d_prot	exponential	Mucorales > Mortierellales	6.127244710124823e-4	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.008619510279295485	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_prot	stretched	Mucorales > Mortierellales	0.0011615625730114513	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.01817927658639535	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_sub	exponential	Mucorales > Mortierellales	8.470989349062402e-4	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.008619510279295485	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_sub	stretched	Mucorales > Mortierellales	8.470989349062402e-4	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.012635580888435307	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_time	exponential	Mucorales > Mortierellales	8.470989349062402e-4	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_time	exponential	Mucorales > Umbelopsidales	0.005769994245129487	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_time	stretched	Mucorales > Mortierellales	8.470989349062402e-4	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_time	stretched	Mucorales > Umbelopsidales	0.012635580888435307	1	1000	meso	Kendall's tau index	FALSE
+all	tau_index_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.5522335484164781	0	1000	meso	Kendall's tau index	FALSE
+ebpnor	corr_index_norm	d_prot	exponential	Mucorales > Mortierellales	0.03854993587177089	1	1000	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.025093093384487654	0.5039525691699605	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.12263905840338642	0	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_prot	stretched	Mucorales > Mortierellales	0.03854993587177089	1	1000	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.04482402772007912	0.5039525691699605	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.12263905840338642	0	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_sub	exponential	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.025093093384487654	0.5039525691699605	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.12263905840338642	0	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_sub	stretched	Mucorales > Mortierellales	0.03854993587177089	1	1000	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.025093093384487654	0.5039525691699605	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.12263905840338642	0	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_time	exponential	Mucorales > Mortierellales	0.03854993587177089	1	1000	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_time	exponential	Mucorales > Umbelopsidales	0.025093093384487654	0.5039525691699605	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_time	stretched	Mucorales > Mortierellales	0.03854993587177089	1	1000	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_time	stretched	Mucorales > Umbelopsidales	0.025093093384487654	0.5039525691699605	506	meso	Correlation index	FALSE
+ebpnor	corr_index_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.12263905840338642	0	506	meso	Correlation index	FALSE
+ebpnor	goc1_intra_norm	d_prot	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_prot	stretched	Mucorales > Mortierellales	0.4480623889864227	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_sub	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_sub	stretched	Mucorales > Mortierellales	0.18038267529225063	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_time	exponential	Mucorales > Mortierellales	0.2569454456288568	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_time	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_time	stretched	Mucorales > Mortierellales	0.2569454456288568	0	1000	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_time	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc1_intra_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	Conserved adjacencies, intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_prot	exponential	Mucorales > Mortierellales	0.2569454456288568	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_prot	stretched	Mucorales > Mortierellales	0.5519376110135773	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.8773609415966136	0	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_sub	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_sub	stretched	Mucorales > Mortierellales	0.18038267529225063	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_time	exponential	Mucorales > Mortierellales	0.3476492833913184	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_time	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_time	stretched	Mucorales > Mortierellales	0.3476492833913184	0	1000	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_time	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	goc_intra_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	micro	GOC (vicinity 4), intra-chromosomal	FALSE
+ebpnor	same_chr	d_prot	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_prot	exponential	Mucorales > Umbelopsidales	0.04482402772007912	0.5039525691699605	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_prot	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_prot	stretched	Mucorales > Mortierellales	0.4480623889864227	0	1000	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_prot	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_prot	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_sub	exponential	Mucorales > Mortierellales	0.2569454456288568	0	1000	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_sub	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_sub	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_sub	stretched	Mucorales > Mortierellales	0.3476492833913184	0	1000	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_sub	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_sub	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_time	exponential	Mucorales > Mortierellales	0.3476492833913184	0	1000	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_time	exponential	Mucorales > Umbelopsidales	0.025093093384487654	0.5039525691699605	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_time	exponential	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_time	stretched	Mucorales > Mortierellales	0.5519376110135773	0	1000	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_time	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	same_chr	d_time	stretched	Umbelopsidales > Mortierellales	0.9735962442919432	0	506	macro	Neighbours on the same chromosome	FALSE
+ebpnor	strand_index_norm	d_prot	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.6507323208483307	0	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_prot	stretched	Mucorales > Mortierellales	0.18038267529225063	0	1000	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.6507323208483307	0	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_sub	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.6507323208483307	0	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_sub	stretched	Mucorales > Mortierellales	0.11999252152377249	0	1000	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.6507323208483307	0	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_time	exponential	Mucorales > Mortierellales	0.18038267529225063	0	1000	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_time	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.6507323208483307	0	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_time	stretched	Mucorales > Mortierellales	0.11999252152377249	0	1000	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_time	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Strand randomisation index	FALSE
+ebpnor	strand_index_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.6507323208483307	0	506	meso	Strand randomisation index	FALSE
+ebpnor	tau_index_norm	d_prot	exponential	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_prot	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_prot	exponential	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_prot	stretched	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_prot	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_prot	stretched	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_sub	exponential	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_sub	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_sub	exponential	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_sub	stretched	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_sub	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_sub	stretched	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_time	exponential	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_time	exponential	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_time	exponential	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_time	stretched	Mucorales > Mortierellales	0.025093093384487654	1	1000	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_time	stretched	Mucorales > Umbelopsidales	0.025093093384487654	1	506	meso	Kendall's tau index	FALSE
+ebpnor	tau_index_norm	d_time	stretched	Umbelopsidales > Mortierellales	0.34926767915166934	0	506	meso	Kendall's tau index	FALSE

@@ -1,0 +1,19 @@
+genome_set	index	comparison	median_p	frac_draws_p05	n_draws	scale	label
+matched	corr_index_norm	Mucorales > Mortierellales	0.004237400946076916	1	1000	meso	Correlation index
+matched	corr_index_norm	Mucorales > Umbelopsidales	0.025093093384487654	1	1000	meso	Correlation index
+matched	corr_index_norm	Umbelopsidales > Mortierellales	0.7562733548179825	0	1000	meso	Correlation index
+matched	goc1_intra_norm	Mucorales > Mortierellales	0.02539926036941996	0.751	1000	micro	Conserved adjacencies, intra-chromosomal
+matched	goc1_intra_norm	Mucorales > Umbelopsidales	0.025093093384487654	1	1000	micro	Conserved adjacencies, intra-chromosomal
+matched	goc1_intra_norm	Umbelopsidales > Mortierellales	0.8764200133940464	0	1000	micro	Conserved adjacencies, intra-chromosomal
+matched	goc_intra_norm	Mucorales > Mortierellales	0.0068947130656511315	1	1000	micro	GOC (vicinity 4), intra-chromosomal
+matched	goc_intra_norm	Mucorales > Umbelopsidales	0.025093093384487654	1	1000	micro	GOC (vicinity 4), intra-chromosomal
+matched	goc_intra_norm	Umbelopsidales > Mortierellales	0.8764200133940464	0	1000	micro	GOC (vicinity 4), intra-chromosomal
+matched	same_chr	Mucorales > Mortierellales	0.6005466651783651	0	1000	macro	Neighbours on the same chromosome
+matched	same_chr	Mucorales > Umbelopsidales	0.07548115988012599	0.476	1000	macro	Neighbours on the same chromosome
+matched	same_chr	Umbelopsidales > Mortierellales	0.8764200133940464	0	1000	macro	Neighbours on the same chromosome
+matched	strand_index_norm	Mucorales > Mortierellales	0.004237400946076916	1	1000	meso	Strand randomisation index
+matched	strand_index_norm	Mucorales > Umbelopsidales	0.025093093384487654	1	1000	meso	Strand randomisation index
+matched	strand_index_norm	Umbelopsidales > Mortierellales	0.7562733548179825	0	1000	meso	Strand randomisation index
+matched	tau_index_norm	Mucorales > Mortierellales	0.004237400946076916	1	1000	meso	Kendall's tau index
+matched	tau_index_norm	Mucorales > Umbelopsidales	0.025093093384487654	1	1000	meso	Kendall's tau index
+matched	tau_index_norm	Umbelopsidales > Mortierellales	0.7562733548179825	0	1000	meso	Kendall's tau index

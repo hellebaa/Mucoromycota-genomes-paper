@@ -1,0 +1,402 @@
+---
+title: "Within-chromosome gene-order scrambling (mesosynteny) across Mortierellales, Umbelopsidales and Mucorales"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    self_contained: true
+    df_print: kable
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.align = "center")
+source("analysis/synteny/R/functions.R")
+cfg <- syn_config()
+tab <- function(f) read_tsv(file.path(cfg$tables, f), show_col_types = FALSE)
+genomes <- read_genome_table(cfg, all = TRUE)
+qc <- tab("genome_qc.tsv")
+pi_tab <- tab("pair_indices.tsv") %>% mutate(same_chr = 1 - inter_break)
+fits <- tab("decay_fits.tsv")
+rates <- tab("rates_by_clade.tsv")
+tests <- tab("rate_tests.tsv")
+mvals <- tab("matched_values_by_clade.tsv")
+mtests <- tab("matched_tests.tsv")
+ceiling_tab <- tab("noise_ceiling.tsv")
+within <- pi_tab %>% filter(within) %>% mutate(clade = factor(clade, levels = clade_levels))
+
+fmt_p <- function(p) ifelse(p < 0.001, "< 0.001", sprintf("%.3f", p))
+p_text <- function(p) ifelse(p < 0.001, "p < 0.001", sprintf("p = %.3f", p))
+pval <- function(df, idx, cmp, ...) {
+  df %>% filter(index == idx, comparison == cmp, ...) %>% pull(median_p) %>% p_text()
+}
+prim <- function(cmp) pval(tests, "strand_index_norm", cmp, genome_set == "all",
+                          divergence == "d_sub", model == "stretched")
+mv <- function(idx, cl) mvals %>% filter(index == idx, clade == cl) %>% pull(median_value) %>%
+  round(2)
+n_indep <- mvals %>% filter(index == "strand_index_norm") %>%
+  with(setNames(pairs_per_draw, clade))  # independent pairs per draw, matched window
+idx_lab <- c(strand_index_norm = "Strand randomisation index", tau_index_norm = "Kendall's tau index",
+             corr_index_norm = "Correlation index", goc_intra_norm = "GOC (vicinity 4)",
+             goc1_intra_norm = "Conserved adjacency", same_chr = "Neighbour on same chromosome")
+scale_of <- c(strand_index_norm = "meso", tau_index_norm = "meso", corr_index_norm = "meso",
+              goc_intra_norm = "micro", goc1_intra_norm = "micro", same_chr = "macro")
+pr <- function(a, b) pi_tab %>% filter((.data$a == !!a & .data$b == !!b) | (.data$a == !!b & .data$b == !!a))
+fig <- function(f) knitr::include_graphics(file.path(cfg$figures, f), rel_path = FALSE)
+n_within <- sum(pi_tab$within)
+```
+
+# Summary
+
+**Question.** CENP-A was lost in the ancestor of Umbelopsidales + Mucorales and
+CENP-C in the ancestor of Mucorales. Is within-chromosome gene order scrambled
+faster, for a given sequence divergence, in these clades than in
+Mortierellales, which keep both proteins?
+
+**Answer.**
+
+- **Mucorales: yes.** Gene order and gene orientation within chromosomes decay
+  much faster per unit of sequence divergence than in Mortierellales (primary
+  test, strand randomisation index: one-sided `r prim("Mucorales > Mortierellales")`;
+  Kendall's tau index `r pval(tests, "tau_index_norm", "Mucorales > Mortierellales", genome_set == "all", divergence == "d_sub", model == "stretched")`).
+  Among closely related pairs (`r cfg$d_min_rate` < d ≤ 0.15 CDS subs/site),
+  the median strand index is `r mv("strand_index_norm", "Mucorales")` in
+  Mucorales versus `r mv("strand_index_norm", "Mortierellales")` in
+  Mortierellales (model-free test `r pval(mtests, "strand_index_norm", "Mucorales > Mortierellales")`).
+- **The excess is within chromosomes.** The rate at which neighbouring genes
+  move to *different* chromosomes does not differ between Mucorales and
+  Mortierellales (`r pval(tests, "same_chr", "Mucorales > Mortierellales", genome_set == "all", divergence == "d_sub", model == "stretched")`).
+  Gene content of chromosomes is kept while order and orientation are lost:
+  the mesosynteny pattern of Hane et al. (2011).
+- **Umbelopsidales: no.** Umbelopsidales (CENP-A lost, CENP-C kept) scramble no
+  faster than Mortierellales on any index (strand index `r prim("Umbelopsidales > Mortierellales")`)
+  and slower than Mucorales (`r prim("Mucorales > Umbelopsidales")`).
+- **Interpretation.** Accelerated scrambling coincides with the loss of CENP-C
+  (and the mosaic centromeres described in *Mucor*), not with the loss of
+  CENP-A alone. This is one evolutionary contrast: other Mucorales-specific
+  traits could explain it as well (Section [Caveats](#caveats)).
+- The preliminary figure's comparison (*M. fragilis* vs *M. plumbeus* at
+  d = 0.050 vs *M. zonata* vs *L. hyalina* at 0.056) used an older tree. In the
+  current CDS tree the *Mucor* pair is 0.318 subs/site apart. The conclusion
+  still holds with properly matched pairs: *M. circinelloides* strains
+  (d = `r sprintf("%.3f", pr("gzMucCirc1", "gzMucCirc2")$d_sub)`) and *M. fragilis*
+  strains (d = `r sprintf("%.3f", pr("gzMucFrag1", "gzMucFrag2")$d_sub)`) are already
+  scrambled, unlike *M. zonata* vs *L. hyalina* (d = `r sprintf("%.3f", pr("ggMorZona1", "gzLinHyal1")$d_sub)`).
+
+Logs: [DECISIONS.md](DECISIONS.md) (all analysis decisions, including those
+made after looking at data) and [LITERATURE.md](LITERATURE.md) (searches and
+sources).
+
+# Background
+
+*Mucor circinelloides* lacks CENP-A and CENP-C and has "mosaic" centromeres:
+a short kinetochore-binding core flanked by Grem-LINE1 retroelements
+(Navarro-Mendoza et al. 2019). Both proteins are absent across Mucorales;
+CENP-A is also absent in Umbelopsidales (this project). Losing these proteins
+should change centromere organisation, and centromeres constrain which
+rearrangements are viable (pericentric inversions, translocations between
+centromeres; Coelho et al. 2024, Guin et al. 2020).
+
+*Mesosynteny* (Hane et al. 2011) is conservation of gene content within
+homologous chromosomes with randomised gene order and orientation. It was
+described in filamentous Ascomycetes, especially Dothideomycetes, and
+attributed to frequent intrachromosomal inversions with rare translocations.
+Similar patterns, conserved chromosome content with scrambled order, are
+known from holocentric lineages that lost CenH3/CENP-A: Lepidoptera
+(d'Alençon et al. 2010) and rhabditid nematodes (Coghlan & Wolfe 2002;
+Gonzalez de la Rosa et al. 2021). They also occur in monocentric lineages
+(*Drosophila* Muller elements, Bhutkar et al. 2008; *Oikopleura*, Plessy et
+al. 2024), so the pattern alone is not diagnostic of centromere change. No
+published study was found that relates kinetochore gene loss in fungi to the
+rate of within-chromosome scrambling.
+
+# Data
+
+```{r data-counts}
+n_g <- genomes %>% filter(include == "yes") %>% count(order)
+```
+
+- **Genomes:** `r sum(genomes$include == "yes")` Mucoromycota genomes with gene
+  coordinates (`r paste(n_g$n, n_g$order, collapse = ", ")`). *Mucor lusitanicus*
+  (MucCirc3) is excluded because its OrthoFinder protein IDs cannot be
+  linked to its coordinate table (DECISIONS.md D3).
+- **Orthologues:** OrthoFinder 2.5.4 pairwise orthologues
+  (`data/orthofinder/results/Orthologues`); one-to-one orthologues are used as
+  anchors. No Mucoromycota GENESPACE run exists in `Mucor/data` on NeLS (D1).
+- **Divergence:** patristic distance on the CDS maximum-likelihood tree
+  (substitutions/site; primary); protein distance (OrthoFinder species tree)
+  and time (dated tree) as sensitivity analyses.
+- **Pairs:** all `r n_within` within-order pairs (plus EBP-Nor pairs across
+  orders, not used in the tests). Median `r format(median(pi_tab$n_anchors), big.mark = ",")`
+  one-to-one anchors per pair (range `r format(min(pi_tab$n_anchors), big.mark = ",")`–`r format(max(pi_tab$n_anchors), big.mark = ",")`).
+
+```{r qc-table}
+qc %>%
+  transmute(Genome = genome, Species = species, Order = order, Source = source,
+            Genes = genes, `Sequences with genes` = seqs, `Gene N50` = gene_n50,
+            `Genes on seqs >=100 genes` = sprintf("%.1f%%", 100 * frac_genes_seq100),
+            `OrthoFinder IDs mapped` = sprintf("%.1f%%", 100 * frac_mapped)) %>%
+  arrange(Order, Genome) %>%
+  knitr::kable(caption = "Genome QC. Gene N50: number of genes on the sequence at which half of all genes are reached in sequences sorted by gene count.")
+```
+
+# Methods
+
+**Anchors.** For each genome pair, one-to-one orthologues from the
+OrthoFinder pairwise tables are placed on the assemblies. Gene order is the
+rank of an anchor among anchors on the same sequence. Relative orientation is
++1 if both genes are on the same strand.
+
+**Indices** (re-implementations for orthologue anchors of published indices;
+checked on synthetic genomes in `R/test_functions.R`). Each index is computed
+with each genome as reference and the two values are averaged.
+
+| Scale | Index | Definition | Source |
+|---|---|---|---|
+| macro | Neighbour on same chromosome | fraction of adjacent anchors whose orthologues are on the same chromosome in the other genome | breakpoint logic of Plessy et al. 2024 |
+| macro | Synteny index; macrosynteny fraction | anchors on the best-matching chromosome; anchors on Fisher-significant chromosome pairs | GenomicBreaks; odp, macrosyntR |
+| meso | **Strand randomisation index** (primary) | per chromosome and its best-matching partner, `|n_same - n_opposite| / n`, anchor-weighted mean | GenomicBreaks, Plessy et al. 2024 |
+| meso | Kendall's tau index; correlation index | `|tau|` of anchor ranks; `|r|` of positions, on the same chromosome pairs | GenomicBreaks (correlation index) |
+| micro | GOC; conserved adjacency | adjacent anchors whose orthologues are within 4 (GOC) or 1 anchor(s) on the other chromosome | Rocha 2003; GenomicBreaks |
+
+Within-chromosome indices are normalised to `(observed - random) / (1 - random)`
+using 20 shuffles of anchor positions within each chromosome (chromosome
+content kept, orientation randomised): 1 = conserved, 0 = as random as
+chromosome content allows. The "same chromosome" index is not normalised.
+
+**Decay with divergence.** Each index is modelled as
+`I(d) = c * exp(-(lambda * d)^beta)`. The ceiling `c` comes from
+`r ceiling_tab$n_pairs[1]` near-identical pairs (d ≤ `r cfg$d_min_rate`);
+`beta` (shape) is shared by all clades and estimated per index; `lambda`
+is the clade-specific rate. Each pair with `r cfg$d_min_rate` < d ≤ `r cfg$d_max` gets a rate
+`lambda_ij = (-log(I_ij / c))^(1/beta) / d_ij`. The range ends just above
+the deepest split within Mortierellales and Umbelopsidales, so all clades are
+compared over the same range. The model and its shared shape were set after
+an interim look at the data (DECISIONS.md D11-D12). The plain exponential
+model (`beta = 1`) that was specified first is reported as a sensitivity
+analysis.
+
+**Tests.** Pairs share branches, so tests use sets of phylogenetically
+independent pairs (paths in the ML tree share no branch; Maddison 2000),
+chosen greedily with the shortest paths first and random tie-breaks. Each of
+`r cfg$n_draws` draws contains up to 6 Mortierellales, 3 Umbelopsidales and
+12 Mucorales pairs. In each draw, one-sided Wilcoxon rank-sum tests compare
+per-pair rates between clades. Reported values are the median p over draws
+and the fraction of draws with p < 0.05. A model-free test compares raw
+index values of independent pairs with `r cfg$d_min_rate` < d ≤ 0.15.
+
+**Pre-specified primary test:** strand randomisation index, CDS distance,
+all genomes, Mucorales > Mortierellales and Umbelopsidales > Mortierellales.
+The primary index was chosen after a six-pair pilot, before any clade
+comparison (D7).
+
+# Results
+
+## Dot plots at matched divergence
+
+```{r fig-main, out.width = "100%", fig.cap = paste0("**Figure 1.** (A) Oxford dot plots of one-to-one orthologues for pairs at similar divergence within each order: top row closely related, bottom row d ≈ 0.45. Points are coloured by gene orientation relative to the other genome, after orienting each chromosome on its main diagonal. Grid lines are sequence boundaries (sequences with ≥ 1.5% of anchors; numbered by size). (B) Indices against CDS divergence for all within-order pairs with d ≤ 0.65, with descriptive LOESS smoothers. Right panel: index values at matched divergence (", cfg$d_min_rate, " < d ≤ 0.15); points are all pairs in this range. Pairs whose paths in the tree share a branch are not independent (a rearrangement on that branch counts in each of them), so bars and p use only sets of phylogenetically independent pairs, whose paths share no branch (Maddison 2000). ", format(cfg$n_draws, big.mark = ","), " such sets were drawn, each with ", n_indep[["Mortierellales"]], " Mortierellales, ", n_indep[["Umbelopsidales"]], " Umbelopsidales and ", n_indep[["Mucorales"]], " Mucorales pairs. A bar is the median over draws of the clade's median index value; p is the median over draws of a one-sided Wilcoxon test that Mucorales pairs are more scrambled than Mortierellales pairs.")}
+fig("fig_mesosynteny_main.png")
+```
+
+Mortierellales and Umbelopsidales keep long collinear diagonals between
+closely related genomes (Figure 1A, top). In Mucorales, pairs of similar or
+smaller divergence already show the mesosyntenic pattern: genes stay on the
+homologous chromosome, but order is broken into short, often inverted
+segments. At d ≈ 0.45, Mortierellales and Umbelopsidales still show
+recognisable diagonals made of rearranged blocks. *M. plumbeus* vs
+*M. lanceolatus* shows only clouds of dots within chromosome-pair boxes.
+
+More closely related pairs are in Supplementary Figure S1: within-species
+*Mucor* strain pairs at d = 0.02-0.06 are already strongly rearranged.
+
+## Decay rates and tests
+
+```{r table-tests}
+tests %>%
+  filter(genome_set == "all", divergence == "d_sub", model == "stretched") %>%
+  select(index, comparison, median_p, frac_draws_p05) %>%
+  left_join(mtests %>% select(index, comparison, matched_p = median_p), by = c("index", "comparison")) %>%
+  mutate(Scale = scale_of[index], Index = idx_lab[index],
+         `p (rates)` = fmt_p(median_p), `draws p<0.05` = sprintf("%.0f%%", 100 * frac_draws_p05),
+         `p (matched d<=0.15)` = fmt_p(matched_p)) %>%
+  arrange(factor(index, levels = names(idx_lab)), comparison) %>%
+  select(Scale, Index, Comparison = comparison, `p (rates)`, `draws p<0.05`, `p (matched d<=0.15)`) %>%
+  knitr::kable(caption = "One-sided tests on phylogenetically independent pairs (median p over draws). 'Rates': per-pair decay rates, CDS distance, all genomes. 'Matched': raw index values of pairs with 0.01 < d <= 0.15. With 3 Umbelopsidales pairs (2 in the matched window), the smallest attainable p for comparisons with Umbelopsidales is about 0.006 (0.025).")
+```
+
+```{r table-rates}
+rates %>%
+  filter(genome_set == "all", divergence == "d_sub", model == "stretched") %>%
+  left_join(fits %>% filter(divergence == "d_sub") %>% select(index, clade, beta), by = c("index", "clade")) %>%
+  mutate(Index = idx_lab[index], clade = factor(clade, levels = clade_levels),
+         rate = sprintf("%.3g (%.3g-%.3g)", median_rate, rate_lo, rate_hi)) %>%
+  select(index, Index, clade, rate, beta) %>%
+  pivot_wider(names_from = clade, values_from = rate) %>%
+  arrange(factor(index, levels = names(idx_lab))) %>%
+  transmute(Index, Mortierellales, Umbelopsidales, Mucorales, `shape beta` = round(beta, 2)) %>%
+  knitr::kable(caption = "Decay rate lambda per CDS substitution/site: median of per-clade median rates over independent-pair draws (95% range over draws). Higher = faster loss of order.")
+```
+
+```{r table-matched}
+mvals %>%
+  mutate(Index = idx_lab[index], clade = factor(clade, levels = clade_levels),
+         v = sprintf("%.2f (n = %d)", median_value, as.integer(pairs_per_draw))) %>%
+  select(index, Index, clade, v) %>%
+  pivot_wider(names_from = clade, values_from = v) %>%
+  arrange(factor(index, levels = names(idx_lab))) %>%
+  select(-index) %>%
+  knitr::kable(caption = "Index values among closely related pairs (0.01 < d <= 0.15): median over independent-pair draws (independent pairs per draw).")
+```
+
+```{r match-d}
+md <- within %>% filter(d_sub > cfg$d_min_rate, d_sub <= 0.15) %>% group_by(clade) %>%
+  summarise(n = n(), med_d = median(d_sub))
+```
+
+Among all pairs in the matched window, the Mucorales pairs are, if anything, *less*
+divergent (median d = `r round(md$med_d[md$clade == "Mucorales"], 3)`) than the
+Mortierellales pairs (median d = `r round(md$med_d[md$clade == "Mortierellales"], 3)`),
+which makes the comparison conservative.
+
+**Scale of the difference.** Mucorales lose order at the meso scale (strand
+orientation, chromosome-wide rank correlation) many times faster than
+Mortierellales. Among closely related pairs, local neighbourhoods (GOC,
+adjacency) also break faster in Mucorales, but the absolute difference is
+small (GOC `r mv("goc_intra_norm", "Mucorales")` vs `r mv("goc_intra_norm", "Mortierellales")`):
+most genes keep their immediate neighbours, so Mucorales rearrangements move
+and invert blocks of several genes rather than single genes. At d ≈ 0.5,
+Mortierellales have lost as many or more local adjacencies than Mucorales
+(Supplementary Figure S2), so the micro-scale difference is limited to
+recent divergence. Inter-chromosomal exchange (neighbour on the
+same chromosome) does not differ between Mucorales and Mortierellales.
+
+**Mortierellales also randomise gene orientation, but more slowly and
+without losing global order.** At d ≈ 0.4-0.6 the strand index of
+Mortierellales pairs approaches 0, while Kendall's tau stays around 0.5
+(Figure 1B, Supplementary Figure S3). This fits many small inversions that
+flip genes locally while the chromosome-scale diagonal is kept. Mucorales
+lose both.
+
+**Umbelopsidales** keep order at least as well as Mortierellales on every
+index. Only 6 genomes and 3 independent pairs are available, so a modest
+acceleration cannot be excluded, but the point estimates go in the opposite
+direction.
+
+## Sensitivity analyses
+
+```{r table-sens}
+sens <- tests %>%
+  filter(index %in% c("strand_index_norm", "tau_index_norm", "same_chr")) %>%
+  mutate(setting = case_when(
+    genome_set == "all" & divergence == "d_sub" & model == "stretched" ~ "1 Primary (all genomes, CDS, stretched)",
+    genome_set == "all" & divergence == "d_prot" & model == "stretched" ~ "2 Protein distance",
+    genome_set == "all" & divergence == "d_time" & model == "stretched" ~ "3 Time (dated tree)",
+    genome_set == "all" & divergence == "d_sub" & model == "exponential" ~ "4 Exponential model (beta = 1)",
+    genome_set == "ebpnor" & divergence == "d_sub" & model == "stretched" ~ "5 EBP-Nor genomes only",
+    TRUE ~ NA_character_)) %>%
+  filter(!is.na(setting)) %>%
+  mutate(cell = fmt_p(median_p), Index = idx_lab[index]) %>%
+  select(setting, Index, comparison, cell) %>%
+  pivot_wider(names_from = comparison, values_from = cell) %>%
+  arrange(setting, Index)
+knitr::kable(sens, caption = "Median one-sided p across sensitivity settings. EBP-Nor only: 2 Mortierellales and 1-2 Umbelopsidales independent pairs per draw, so power is low.")
+```
+
+Conclusions are unchanged with protein distance, time, or the plain
+exponential model. With EBP-Nor genomes only (one annotation pipeline), the
+Mucorales vs Mortierellales difference remains for Kendall's tau and the
+correlation index but not for the strand index. This set has only two
+independent Mortierellales pairs.
+
+```{r fig-forest, out.width = "100%", fig.cap = "**Supplementary Figure S4.** Decay rates per clade for all indices and sensitivity settings (median over independent-pair draws, 95% range). Rates of 0 are drawn at 0.001."}
+fig("figS_rates_forest.png")
+```
+
+# Caveats {#caveats}
+
+1. **One evolutionary contrast.** CENP-C was lost once, on the stem of
+   Mucorales. Anything else that changed on that branch could explain the
+   faster scrambling just as well: whole-genome duplication in Mucorales,
+   Grem-LINE retroelements at centromeres, RNAi/heterochromatin pathways,
+   genome and repeat content, life history, frequency of sex. The data show
+   a coincidence in timing, not a mechanism. The Umbelopsidales result is
+   informative because it separates CENP-A loss from CENP-C loss, but it is
+   based on 6 genomes.
+2. **Mesosynteny is not specific to centromere change.** Dothideomycetes
+   (monocentric, CENP-A present) show the same pattern (Hane et al. 2011).
+3. **The strand index has a block-size-dependent floor.** If genes move in
+   blocks that keep their internal orientation, the expected index under
+   complete scrambling is above the gene-level random expectation used for
+   normalisation. Mucorales pairs level off at ~0.05-0.15 rather than 0
+   (Figure 1B). This affects deep pairs only. The tests rely on shallow
+   pairs, and the tau and correlation indices give the same conclusion.
+4. **Rate model.** The stretched-exponential shape was chosen after an
+   interim look at the data (D11-D12). With one shape shared by all clades
+   it fits poorly in places (Supplementary Figure S5): the Mucorales strand
+   index at intermediate divergence and Mortierellales tau/correlation
+   among close pairs. Decay is therefore not well described by a single
+   rate per clade, and the rate values should be read as summaries, not as
+   estimates of a rearrangement rate. The model-free matched-divergence
+   test and the plain exponential model give the same conclusions.
+5. **Assemblies and annotation.** Public and EBP-Nor genomes differ in
+   annotation pipeline. All genomes are highly contiguous (≥ 78% of genes on
+   sequences with ≥ 100 genes). Indices are computed per homologous
+   sequence pair, so fragmentation reduces anchors rather than adding
+   apparent scrambling. Misassemblies would show up as isolated off-diagonal
+   blocks, not as the within-box scatter seen in Mucorales.
+6. **Pairs selected for maximal independence** favour closely related pairs
+   (D13). Rates are normalised by divergence, and the matched-divergence
+   test does not rely on the rate model.
+
+# Possible next steps
+
+- Map centromeres (Hi-C contact maps are on NeLS under `data/HiC/mcool`;
+  AT-rich, Grem-LINE-associated regions in Mucorales). Then test whether
+  rearrangement breakpoints are enriched near centromeres and whether
+  centromere positions are conserved within chromosome-pair boxes.
+- Count inversions directly (breakpoint graphs, e.g. GenomicBreaks) to
+  estimate inversion size distributions per clade. The data here suggest
+  small inversions in Mortierellales and larger, more frequent ones in
+  Mucorales.
+- Add Umbelopsidales genomes, or more closely related Umbelopsidales pairs,
+  to raise power for the CENP-A-only contrast.
+
+# Supplementary figures
+
+```{r figS1, out.width = "100%", fig.cap = "**Supplementary Figure S1.** Oxford dot plots for additional closely related pairs (sorted by order and divergence)."}
+fig("figS_dotplots_shallow.png")
+```
+
+```{r figS2, out.width = "100%", fig.cap = "**Supplementary Figure S2.** All indices against CDS divergence for all within-order pairs (full divergence range; dashed line: upper limit of the range used for tests)."}
+fig("figS_indices_vs_divergence.png")
+```
+
+```{r figS3, out.width = "100%", fig.cap = "**Supplementary Figure S3.** Strand randomisation index against the three divergence measures."}
+fig("figS_divergence_measures.png")
+```
+
+```{r figS5, out.width = "100%", fig.cap = "**Supplementary Figure S5.** Stretched-exponential fits (clade-specific rate, shared shape) used for per-pair rates."}
+fig("figS_decay_model_fits.png")
+```
+
+```{r figS6, out.width = "60%", fig.cap = "**Supplementary Figure S6.** Chromosome membership (neighbour on same chromosome) against within-chromosome orientation (strand index) per pair (0.01 < d <= 0.65). Mucorales pairs fill the mesosyntenic corner: high chromosome conservation, low order conservation."}
+fig("figS_mesosynteny_map.png")
+```
+
+```{r figS7, out.width = "100%", fig.cap = "**Supplementary Figure S7.** Strand randomisation index for all analysed pairs; genomes in phylogenetic order (top bar: order). White: pair not analysed (public genomes from different orders)."}
+fig("figS_heatmap_strand.png")
+```
+
+# Reproducibility
+
+```bash
+bash analysis/synteny/run_all.sh
+```
+
+Outputs: `analysis/synteny/results/tables/*.tsv`,
+`analysis/synteny/results/figures/*.{pdf,png}`.
+
+```{r session}
+sessionInfo()
+```

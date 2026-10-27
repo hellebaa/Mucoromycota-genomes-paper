@@ -2,11 +2,15 @@
 # Download specific files from NeLS storage.
 #
 # Usage:
-#   nels_download.sh <local/path/relative/to/repo/root> [<more/files> ...]
+#   download_files.sh <local/path/relative/to/repo/root> [<more/files> ...]
 #
 # Each argument is a path relative to the repo root (e.g. data/orthofinder/results/foo.txt).
 # The file is fetched from the corresponding path on NeLS:
 #   nels.storage:Projects/NMBU_threeD_Sandve_2024/Mucor/data/<rest of path>
+#
+# All files are transferred in a single rsync call (one ssh connection).
+# -k follows symlinked directories on NeLS (e.g. data/orthofinder/results), so
+# they arrive as real directories.
 #
 # Requires ~/.ssh/config to have a Host entry named "nels.storage" (see NELS_SETUP.md).
 
@@ -23,12 +27,6 @@ if [[ $# -eq 0 ]]; then
     exit 1
 fi
 
-for local_rel in "$@"; do
-    local_abs="${REPO_ROOT}/${local_rel}"
-    remote_path="${NELS_REMOTE_BASE}/${local_rel}"
-
-    mkdir -p "$(dirname "${local_abs}")"
-
-    echo "==> ${local_rel}"
-    rsync -avh --progress "${NELS_HOST}:${remote_path}" "${local_abs}"
-done
+echo "==> Downloading $# files from ${NELS_HOST}"
+printf '%s\n' "$@" |
+    rsync -avhk --files-from=- "${NELS_HOST}:${NELS_REMOTE_BASE}/" "${REPO_ROOT}/"
