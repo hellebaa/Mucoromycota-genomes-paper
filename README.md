@@ -32,3 +32,7 @@ bash analysis/synteny/download_data.sh
 2. Add a `download_data.sh` that calls `scripts/download_files.sh` with the
    required `data/` paths
 3. Put analysis scripts in `analysis/<name>/`
+
+## Shared Hi-C reference annotations
+
+The [three-species Hi-C reference release](analysis/hic/README.md) provides candidate-centromere and telomere BED files, evidence tables and checksum-verified NeLS downloads.

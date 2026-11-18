@@ -27,6 +27,11 @@ if [[ $# -eq 0 ]]; then
     exit 1
 fi
 
+if [[ "${1:-}" == "--manifest" ]]; then
+    [[ $# -eq 2 ]] || { echo "Usage: $0 --manifest manifest.tsv" >&2; exit 1; }
+    exec python3 "${SCRIPT_DIR}/download_manifest.py" "$2"
+fi
+
 echo "==> Downloading $# files from ${NELS_HOST}"
 printf '%s\n' "$@" |
     rsync -avhk --files-from=- "${NELS_HOST}:${NELS_REMOTE_BASE}/" "${REPO_ROOT}/"

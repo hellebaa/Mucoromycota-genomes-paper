@@ -2,3 +2,6 @@ data/
 .Rproj.user
 *.Rproj
 .DS_Store
+
+# Generated analysis results are archived on NeLS.
+results/

@@ -1,0 +1,6 @@
+name: mucor-hic-reference
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - rsync
