@@ -23,6 +23,8 @@ rates <- tab("rates_by_clade.tsv")
 tests <- tab("rate_tests.tsv")
 mvals <- tab("matched_values_by_clade.tsv")
 mtests <- tab("matched_tests.tsv")
+msplit <- tab("mucor_split_by_group.tsv")
+msplit_tests <- tab("mucor_split_tests.tsv")
 ceiling_tab <- tab("noise_ceiling.tsv")
 within <- pi_tab %>% filter(within) %>% mutate(clade = factor(clade, levels = clade_levels))
 
@@ -37,6 +39,20 @@ mv <- function(idx, cl) mvals %>% filter(index == idx, clade == cl) %>% pull(med
   round(2)
 n_indep <- mvals %>% filter(index == "strand_index_norm") %>%
   with(setNames(pairs_per_draw, clade))  # independent pairs per draw, matched window
+# Mucor split (D16): p for a comparison (rates: stretched model; or matched
+# window), and a group's median rate or matched index value
+excl <- "Other Mucorales"
+msp <- function(idx, cmp, set = "mucor") {
+  msplit_tests %>% filter(genome_set == set, index == idx, comparison == cmp,
+                          is.na(model) | model == "stretched") %>% pull(median_p) %>% p_text()
+}
+msv <- function(idx, grp, set = "mucor", digits = 1) {
+  msplit %>% filter(genome_set == set, index == idx, clade == grp,
+                    is.na(model) | model == "stretched") %>% pull(median) %>%
+    round(digits) %>% format(nsmall = digits)
+}
+# smallest one-sided p of the Wilcoxon test (normal approximation) for n1 vs n2
+min_p <- function(n1, n2) pnorm(-(n1 * n2 / 2 - 0.5) / sqrt(n1 * n2 * (n1 + n2 + 1) / 12))
 idx_lab <- c(strand_index_norm = "Strand randomisation index", tau_index_norm = "Kendall's tau index",
              corr_index_norm = "Correlation index", goc_intra_norm = "GOC (vicinity 4)",
              goc1_intra_norm = "Conserved adjacency", same_chr = "Neighbour on same chromosome")
@@ -64,6 +80,11 @@ Mortierellales, which keep both proteins?
   the median strand index is `r mv("strand_index_norm", "Mucorales")` in
   Mucorales versus `r mv("strand_index_norm", "Mortierellales")` in
   Mortierellales (model-free test `r pval(mtests, "strand_index_norm", "Mucorales > Mortierellales")`).
+- **Not only *Mucor*.** Most Mucorales pairs are *Mucor* pairs. The other
+  Mucorales genera on their own also scramble faster than Mortierellales
+  (strand index `r msp("strand_index_norm", paste(excl, "> Mortierellales"))`),
+  at about half the rate of *Mucor* (Section [Mucor versus the other
+  Mucorales genera](#mucor-split)).
 - **The excess is within chromosomes.** The rate at which neighbouring genes
   move to *different* chromosomes does not differ between Mucorales and
   Mortierellales (`r pval(tests, "same_chr", "Mucorales > Mortierellales", genome_set == "all", divergence == "d_sub", model == "stretched")`).
@@ -313,6 +334,76 @@ independent Mortierellales pairs.
 fig("figS_rates_forest.png")
 ```
 
+### Mucor versus the other Mucorales genera {#mucor-split}
+
+```{r mucor-split-counts, include = FALSE}
+mpairs <- msplit %>% filter(index == "strand_index_norm", is.na(model) | model == "stretched") %>%
+  select(genome_set, clade, pairs_per_draw) %>%
+  pivot_wider(names_from = clade, values_from = pairs_per_draw)
+mpd <- function(set, grp) mpairs[[grp]][mpairs$genome_set == set]
+```
+
+Most Mucorales genomes and nearly all close Mucorales pairs are *Mucor*,
+and the few pairs from other Mucorales genera (*Absidia*, *Cunninghamella*,
+*Lichtheimia*) lie above the Mucorales trend in Figure 1B. To check that the
+Mucorales result is not a *Mucor* effect, Mucorales was split into *Mucor*
+(monophyletic in the tree) and the other genera; pairs between the two were
+dropped (D16). This check was added after looking at the data. Independent
+pairs per draw: `r mpd("mucor", "Mucor")` *Mucor* and
+`r mpd("mucor", excl)` other Mucorales pairs for the rate tests;
+`r mpd("mucor_matched", "Mucor")` and `r mpd("mucor_matched", excl)` in the
+matched window.
+
+```{r table-mucor-split}
+cols <- c("Other Mucorales > Mortierellales (rates)", "Other Mucorales > Mortierellales (matched)",
+          "Other Mucorales > Umbelopsidales (rates)", "Mucor > Mortierellales (rates)",
+          "Mucor > Other Mucorales (rates)")
+msplit_tests %>%
+  filter(is.na(model) | model == "stretched") %>%
+  mutate(test = if_else(genome_set == "mucor", "rates", "matched"),
+         col = paste0(comparison, " (", test, ")"),
+         Index = idx_lab[index], Scale = scale_of[index]) %>%
+  filter(col %in% cols) %>%
+  select(Scale, Index, col, median_p) %>%
+  mutate(median_p = fmt_p(median_p)) %>%
+  pivot_wider(names_from = col, values_from = median_p) %>%
+  select(Scale, Index, all_of(cols)) %>%
+  arrange(match(Scale, c("meso", "micro", "macro"))) %>%
+  knitr::kable(caption = paste0(
+    "One-sided tests with Mucorales split into Mucor and the other genera (median p over draws). ",
+    "'Rates': per-pair decay rates, stretched model, CDS distance, all genomes. ",
+    "'Matched': index values of pairs with ", cfg$d_min_rate, " < d <= 0.15; with ",
+    mpd("mucor_matched", excl), " other Mucorales and ", mpd("mucor_matched", "Mortierellales"),
+    " Mortierellales pairs the smallest attainable p is ",
+    sprintf("%.3f", min_p(mpd("mucor_matched", excl), mpd("mucor_matched", "Mortierellales"))), "."))
+```
+
+- **The other Mucorales genera also scramble faster than Mortierellales.**
+  Median strand-index rate `r msv("strand_index_norm", excl)` versus
+  `r msv("strand_index_norm", "Mortierellales")` in Mortierellales
+  (`r msp("strand_index_norm", paste(excl, "> Mortierellales"))`); Kendall's
+  tau and the correlation index agree. At matched divergence their median
+  strand index is `r msv("strand_index_norm", excl, "mucor_matched", 2)`
+  versus `r msv("strand_index_norm", "Mortierellales", "mucor_matched", 2)`:
+  every one of these pairs is more scrambled than every Mortierellales pair,
+  so p is the smallest the test can give.
+- **The difference is weaker at the gene-neighbourhood scale.** GOC and
+  conserved adjacency rates of the other genera differ less clearly from
+  Mortierellales (`r msp("goc_intra_norm", paste(excl, "> Mortierellales"))`
+  and `r msp("goc1_intra_norm", paste(excl, "> Mortierellales"))`).
+- ***Mucor* is faster still.** Its strand-index rate
+  (`r msv("strand_index_norm", "Mucor")`) is about twice that of the other
+  genera (`r msp("strand_index_norm", paste("Mucor >", excl))`; this
+  direction was chosen after seeing Figure 1B). The Mucorales rates in the
+  main tests are therefore dominated by *Mucor*, but the
+  Mucorales-Mortierellales contrast does not depend on it.
+- Chromosome membership (same-chromosome index) shows no difference from
+  Mortierellales for either group.
+
+```{r fig-mucor-split, out.width = "100%", fig.cap = paste0("**Supplementary Figure S8.** Figure 1B with Mucorales split into *Mucor* and the other Mucorales genera (pairs between the two groups omitted). Top: indices against CDS divergence for within-group pairs with d ≤ 0.65, with descriptive LOESS smoothers. Bottom: index values at matched divergence (", cfg$d_min_rate, " < d ≤ 0.15); points are all pairs in this range. Bars are the median over ", format(cfg$n_draws, big.mark = ","), " draws of independent pairs (no shared branch) of each group's median, with ", mpd("mucor_matched", "Mortierellales"), " Mortierellales, ", mpd("mucor_matched", "Umbelopsidales"), " Umbelopsidales, ", mpd("mucor_matched", "Mucor"), " *Mucor* and ", mpd("mucor_matched", excl), " other Mucorales pairs per draw. p under each group is the median over draws of a one-sided Wilcoxon test that the group is more scrambled than Mortierellales; with ", mpd("mucor_matched", "Umbelopsidales"), " Umbelopsidales pairs the smallest attainable p is ", sprintf("%.3f", min_p(mpd("mucor_matched", "Umbelopsidales"), mpd("mucor_matched", "Mortierellales"))), ".")}
+fig("figS_decay_mucor_split.png")
+```
+
 # Caveats {#caveats}
 
 1. **One evolutionary contrast.** CENP-C was lost once, on the stem of
@@ -320,7 +411,10 @@ fig("figS_rates_forest.png")
    faster scrambling just as well: whole-genome duplication in Mucorales,
    Grem-LINE retroelements at centromeres, RNAi/heterochromatin pathways,
    genome and repeat content, life history, frequency of sex. The data show
-   a coincidence in timing, not a mechanism. The Umbelopsidales result is
+   a coincidence in timing, not a mechanism. Rates also vary within
+   Mucorales (*Mucor* about twice as fast as the other genera; Section
+   [Mucor versus the other Mucorales genera](#mucor-split)), so lineage-specific
+   factors contribute beyond the shared loss. The Umbelopsidales result is
    informative because it separates CENP-A loss from CENP-C loss, but it is
    based on 6 genomes.
 2. **Mesosynteny is not specific to centromere change.** Dothideomycetes

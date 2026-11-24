@@ -55,6 +55,23 @@ syn_config <- function() {
 clade_levels <- c("Mortierellales", "Umbelopsidales", "Mucorales")
 clade_colours <- c(Mortierellales = "#3B6FB6", Umbelopsidales = "#C27A0E", Mucorales = "#A23B3B")
 
+# Sensitivity (DECISIONS.md D16): Mucorales split into Mucor (all tips below
+# MRCA of mucor_node; monophyletic) and the other genera. Pairs between the
+# two groups are dropped.
+mucor_node <- c("gzMucPlum1", "gzMucHiem1")
+mucor_group_levels <- c("Mortierellales", "Umbelopsidales", "Mucor", "Other Mucorales")
+mucor_group_colours <- c(clade_colours[c("Mortierellales", "Umbelopsidales")],
+                         Mucor = "#A23B3B", `Other Mucorales` = "#2A9D8F")
+split_mucor <- function(pairs_df, tree) {
+  mucor <- extract.clade(tree, getMRCA(tree, mucor_node))$tip.label
+  pairs_df %>%
+    mutate(clade = case_when(clade != "Mucorales" ~ as.character(clade),
+                             a %in% mucor & b %in% mucor ~ "Mucor",
+                             !a %in% mucor & !b %in% mucor ~ "Other Mucorales")) %>%
+    filter(!is.na(clade)) %>%
+    mutate(clade = factor(clade, levels = mucor_group_levels))
+}
+
 read_genome_table <- function(cfg = syn_config(), all = FALSE) {
   read_tsv(cfg$genomes, show_col_types = FALSE) %>%
     filter(all | include == "yes") %>%

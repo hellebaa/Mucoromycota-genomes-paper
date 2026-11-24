@@ -311,3 +311,83 @@ sequence.
   symlinked directories on NeLS (`data/orthofinder/results`) arrive as real
   directories. This replaces the SSH connection-reuse workaround in D10.
   Checking all 1,287 files takes ~4 s when they are already present.
+
+### D16. Sensitivity: Mucor versus the other Mucorales genera (post hoc)
+
+- Prompted by the data: in the decay plots, the few Mucorales pairs from
+  genera other than *Mucor* (*Absidia*, *Cunninghamella*, *Lichtheimia*) lie
+  above the Mucorales trend, and 66 of the 71 Mucorales pairs with
+  d_min_rate < d <= 0.3 are *Mucor* pairs. The question was whether the
+  Mucorales result is a *Mucor* effect rather than a Mucorales one.
+- *Mucor* is defined as all tips below MRCA(gzMucPlum1, gzMucHiem1). This
+  clade holds exactly the 20 included *Mucor* genomes (plus the excluded
+  MucCirc3) in both the ML and the dated tree, so *Mucor* is monophyletic
+  here. Mucorales pairs are split into *Mucor* pairs and pairs within the
+  other genera (21 genomes); the 14 pairs between the two groups in the
+  rate range are dropped.
+- The rate tests (stretched and exponential models, CDS distance, all
+  genomes) and the matched-divergence tests are repeated with the two groups
+  in place of Mucorales, with their own independent-pair draws. Comparisons:
+  each group vs Mortierellales, other Mucorales vs Umbelopsidales, and
+  *Mucor* > other Mucorales (direction chosen after seeing the plot).
+  Umbelopsidales vs Mortierellales is repeated within these draws so that
+  all p-values in the split figure come from the same draws.
+  The split (`split_mucor()`, group "Other Mucorales") is defined once in
+  `functions.R` and used by `03_statistics.R` and `04_figures.R`.
+  Per-pair rates are those of the main analysis (same shared beta and
+  ceiling). Outputs: `mucor_split_by_group.tsv`, `mucor_split_tests.tsv`.
+  The draws for the main analysis come first from the seeded RNG stream, so
+  all earlier tables are unchanged (checked byte for byte).
+- Result (strand index, stretched model): the other Mucorales genera are
+  faster than Mortierellales (median rate 6.7 vs 1.7, p = 0.004, all
+  draws p < 0.05; tau and correlation p = 0.011). At matched divergence
+  (3 vs 4 independent pairs) their strand index is 0.35 vs 0.90, p = 0.026,
+  the smallest attainable. GOC and conserved adjacency are weaker
+  (p = 0.06-0.09); same chromosome shows no difference. *Mucor* is faster
+  than the other genera (rate 12.2 vs 6.7, p = 0.037, 84% of draws). The
+  Mucorales-Mortierellales conclusion does not depend on *Mucor*; rates
+  vary within Mucorales.
+- Supplementary Figure S8 (`figS_decay_mucor_split`) repeats Figure 1B with
+  the two groups, with p for each group against Mortierellales in the
+  matched panel. *Mucor* keeps the Mucorales colour and square marker; other
+  Mucorales are teal `#2A9D8F` with diamonds. With the three clade colours
+  this passes the palette validator (all-pairs CVD ΔE >= 13.5, normal-vision
+  ΔE >= 16.4, contrast >= 3:1); purple, pink and light-red candidates failed.
+
+### D17. Exploration: why the strand index falls while Kendall's tau barely moves
+
+- Prompted by close *Mucor* pairs (gzMucPlum2 vs other *M. plumbeus*
+  strains, d = 0.011) with strand index 0.69-0.83 but tau 0.96-0.99.
+  `R/explore_strand_vs_tau.R` (not part of `run_all.sh`) draws dot plots and
+  counts runs of consecutive genes in the minority orientation of their
+  chromosome pair for eight pairs. Outputs:
+  `results/figures/explore_strand_tau_{dotplots,runs}`,
+  `results/tables/explore_inverted_runs.tsv`.
+- Why the indices differ: per chromosome pair the raw strand index is
+  1 - 2 x (fraction of genes in the minority orientation), so every inverted
+  gene counts the same whatever the inversion size. Tau counts reversed gene
+  pairs: a clean inversion of k of n genes lowers it by about 2 (k/n)^2.
+  Inversions that are small relative to the chromosome lower the strand
+  index but hardly change tau; tau falls when genes move far relative to each
+  other (large or overlapping inversions, transpositions).
+- Findings (raw indices, direction a -> b):
+  - gzMucPlum2 vs gzMucPlum3: 639 inverted genes (7.6%) in 111 runs, largest
+    38 genes, 98% contiguous in both genomes (simple inversions). Strand
+    0.85; tau if every run were a clean inversion 0.997, observed 0.993.
+  - gzMucPlum3 vs gzMucPlum5 (d = 0.001): 788 inverted genes in only 32 runs,
+    one of 280 genes. A few large inversions between near-identical strains:
+    real polymorphic inversions or scaffold orientation errors in one
+    assembly (not distinguishable with gene positions alone).
+  - gzMucFrag2 vs gzMucFrag3 (d = 0.021): 36% of genes inverted, runs up to
+    315 genes, 70% contiguous; observed tau 0.75 vs 0.91 expected from the
+    inversions alone, so blocks have also moved along chromosomes.
+  - Mortierellales at similar or larger divergence: MorAlpi3 vs gzMorAlpi1
+    (d = 0.014) 3 single inverted genes; ggMorZona1 vs gzLinHyal1
+    (d = 0.040) 194 genes in 39 runs.
+- Conclusion: in close *Mucor* pairs the strand index drops because of many
+  small, in-place inversions; Mortierellales pairs at similar divergence have
+  almost none. No change to the analysis.
+- `R/plot_functions.R` now holds the plot theme, figure export and dot-plot
+  code (moved out of `04_figures.R` unchanged, so both scripts can use it).
+  `04_figures.R` now sets the seed so jittered panels are reproducible; two
+  consecutive runs give byte-identical PNGs.

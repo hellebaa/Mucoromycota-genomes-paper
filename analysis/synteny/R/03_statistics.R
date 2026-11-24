@@ -27,6 +27,8 @@
 #   results/tables/rate_tests.tsv
 #   results/tables/matched_values_by_clade.tsv
 #   results/tables/matched_tests.tsv
+#   results/tables/mucor_split_by_group.tsv   (sensitivity: Mucor vs other Mucorales)
+#   results/tables/mucor_split_tests.tsv
 #   results/cache/independent_draws.rds
 
 source("analysis/synteny/R/functions.R")
@@ -159,11 +161,11 @@ one_sided_p <- function(x, y) {
 
 # For each draw of independent pairs: per-clade medians of `stat` and
 # one-sided Wilcoxon tests that `score` (larger = more scrambled) is larger
-# in the faster clade.
-run_draws <- function(df, set_name, keys_by) {
+# in the faster clade. Clades are taken from the genome set.
+run_draws <- function(df, set_name, keys_by, comps = comparisons) {
   pairs_df <- genome_sets[[set_name]]
-  keys <- pairs_df %>% transmute(a, b, row = row_number())
-  df <- semi_join(df, pairs_df, by = c("a", "b"))
+  keys <- pairs_df %>% transmute(a, b, clade, row = row_number())
+  df <- semi_join(df, pairs_df, by = c("a", "b")) %>% select(-clade)
   imap_dfr(draws[[set_name]], function(rows, draw) {
     df %>%
       inner_join(filter(keys, row %in% rows), by = c("a", "b")) %>%
@@ -172,7 +174,7 @@ run_draws <- function(df, set_name, keys_by) {
         med <- x %>% group_by(clade) %>%
           summarise(n = n(), median_stat = median(stat), n_saturated = sum(saturated),
                     .groups = "drop")
-        tests <- comparisons %>%
+        tests <- comps %>%
           mutate(p = map2_dbl(faster, slower, ~ one_sided_p(x$score[x$clade == .x],
                                                            x$score[x$clade == .y])))
         tibble(med = list(med), tests = list(tests))
@@ -229,6 +231,34 @@ matched_sum <- summarise_draws(run_draws(matched_values, "matched", "index"), "i
 write_tsv(matched_sum$meds %>% rename(median_value = median, value_lo = lo, value_hi = hi),
           file.path(cfg$tables, "matched_values_by_clade.tsv"))
 write_tsv(matched_sum$tests, file.path(cfg$tables, "matched_tests.tsv"))
+
+# --- Sensitivity: Mucor vs the other Mucorales genera (D16) -------------------
+# Mucorales pairs are split into pairs within Mucor and pairs within the other
+# genera (split_mucor(); pairs between the two are dropped). Rate tests (CDS
+# distance, all genomes) and matched-divergence tests are repeated with the
+# two groups in place of Mucorales. In the output, `median` is a rate for
+# genome_set "mucor" and an index value for "mucor_matched".
+mucor_sets <- c(mucor = "all", mucor_matched = "matched")
+genome_sets[names(mucor_sets)] <- map(genome_sets[mucor_sets], split_mucor, tree = tree)
+draws[names(mucor_sets)] <- map(genome_sets[names(mucor_sets)], draw_sets, n_draws = cfg$n_draws)
+
+mucor_comparisons <- tribble(
+  ~comparison,                          ~faster,           ~slower,
+  "Mucor > Mortierellales",             "Mucor",           "Mortierellales",
+  "Other Mucorales > Mortierellales",   "Other Mucorales", "Mortierellales",
+  "Other Mucorales > Umbelopsidales",   "Other Mucorales", "Umbelopsidales",
+  "Mucor > Other Mucorales",            "Mucor",           "Other Mucorales",
+  "Umbelopsidales > Mortierellales",    "Umbelopsidales",  "Mortierellales"
+)
+mucor_rate_sum <- summarise_draws(run_draws(
+  pair_rates %>% filter(divergence == "d_sub") %>% mutate(stat = rate, score = rate),
+  "mucor", rate_keys, mucor_comparisons), rate_keys)
+mucor_matched_sum <- summarise_draws(run_draws(
+  matched_values, "mucor_matched", "index", mucor_comparisons), "index")
+write_tsv(bind_rows(mucor_rate_sum$meds, mucor_matched_sum$meds),
+          file.path(cfg$tables, "mucor_split_by_group.tsv"))
+write_tsv(bind_rows(mucor_rate_sum$tests, mucor_matched_sum$tests),
+          file.path(cfg$tables, "mucor_split_tests.tsv"))
 
 message("Primary test (", primary_index, ", d_sub, all genomes, stretched model):")
 print(rate_tests %>% filter(primary) %>% select(comparison, median_p, frac_draws_p05))

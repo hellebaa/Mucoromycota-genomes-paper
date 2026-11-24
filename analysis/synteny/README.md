@@ -40,6 +40,8 @@ which retain both.
 | `R/02_pair_indices.R` | Indices for all pairs (parallel; cached per pair) |
 | `R/03_statistics.R` | Decay fits, per-clade rates, tests on independent pairs |
 | `R/04_figures.R` | Figures |
+| `R/plot_functions.R` | Plot theme, figure export and Oxford dot plots (shared by the figure scripts) |
+| `R/explore_strand_vs_tau.R` | Exploration (not in `run_all.sh`): dot plots and inverted-gene runs explaining why the strand index falls faster than Kendall's tau (D17) |
 | `synteny_report.Rmd` | Report |
 | `results/tables/` | Output tables (TSV) |
 | `results/figures/` | Figures (PDF + PNG) |
