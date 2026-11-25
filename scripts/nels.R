@@ -75,6 +75,24 @@ nels_path <- function(path = "") {
   out
 }
 
+# Why reading `p` failed: a clear message for folders and missing paths
+# (checked only after a failure, so successful reads cost no extra SSH call).
+.nels_fail <- function(p, what) {
+  kind <- tryCatch(.nels_run(paste(
+    "if [ -d", shQuote(p), "]; then echo dir;",
+    "elif [ -e", shQuote(p), "]; then echo file; else echo missing; fi")),
+    error = function(e) "unreachable")
+  msg <- switch(kind[1],
+    dir = paste0("'", p, "' is a folder, not a file. ",
+                 "Use nels_ls() to see its files and give the path of one of them."),
+    missing = paste0("'", p, "' does not exist on NeLS. ",
+                     "Use nels_ls() to check the folder."),
+    unreachable = paste0("Could not connect to NeLS host '", .nels_host(),
+                         "'. Check `ssh ", .nels_host(), " ls` in a terminal."),
+    paste0(what, " failed for '", p, "' (see the SSH output above)."))
+  stop(msg, call. = FALSE)
+}
+
 #' List files in a NeLS folder.
 #' @param path folder, relative to the project root (default: the root itself)
 #' @param long if TRUE, return `ls -l` style lines with sizes and dates
@@ -89,7 +107,12 @@ nels_ls <- function(path = "", long = FALSE) {
 nels_read <- function(path, ...) {
   p <- nels_path(path)
   reader <- if (grepl("\\.gz$", p)) "gzip -dc" else if (grepl("\\.bz2$", p)) "bzip2 -dc" else "cat"
-  data.table::fread(cmd = .nels_cmd(paste(reader, shQuote(p))), ...)
+  tryCatch(data.table::fread(cmd = .nels_cmd(paste(reader, shQuote(p))), ...),
+           error = function(e) {
+             # fread reports any failed command as a possibly full temp disk
+             if (grepl("External command failed", conditionMessage(e))) .nels_fail(p, "Reading")
+             stop(e)
+           })
 }
 
 # Local copy of a NeLS file: relative paths mirror into the repo (as
@@ -114,7 +137,7 @@ nels_file <- function(path, refresh = FALSE) {
     status <- system(paste(.nels_cmd(paste("cat", shQuote(p))), ">", shQuote(tmp)))
     if (status != 0) {
       unlink(tmp)
-      stop("Download from NeLS failed (exit ", status, "): ", p, call. = FALSE)
+      .nels_fail(p, "Download")
     }
     file.rename(tmp, local)
   }
