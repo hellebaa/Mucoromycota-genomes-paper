@@ -48,9 +48,9 @@ fetch <- function(paths) {
 fig_ids <- c("contiguity", "nearident", "sd_contig", "landscape", "genes_dups",
              "ks_heat", "ks_peaks", "orth_ks",
              "dup_rate", "sd_share", "oxford", "asym", "exp_modes", "node_modes",
-             "nb_age", "nb_same", "nb_events", "anc_ks")
+             "nb_scheme", "nb_age", "nb_same", "nb_events", "anc_ks")
 tab_ids <- c("flags", "identity", "strains", "orders", "pgls", "peaks", "orthks",
-             "nodes", "macro", "asym", "exp_modes", "nb_calib", "nb_nodes", "anc")
+             "nodes", "macro", "asym", "exp_modes", "nb_calib", "nb_nodes", "anc", "anc_counts")
 fig  <- function(id) paste("Figure", match(id, fig_ids))
 tab  <- function(id) paste("Table", match(id, tab_ids))
 cap  <- function(id, text) paste0("**", fig(id), ".** ", text)
@@ -66,6 +66,7 @@ mode_cols <- c(SD = "#D55E00", TD = "#CC79A7", PD = "#56B4E9", DD = "grey70",
 theme_set(theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank()))
 
 pct <- function(x, digits = 0) format(round(100 * x, digits), nsmall = digits)
+fmt_n <- function(x) format(x, big.mark = ",", trim = TRUE)
 ```
 
 # Background {-}
@@ -1347,6 +1348,67 @@ genes on one sequence) were not tested. The rate expected by chance was
 measured by repeating the test after shuffling gene order in each genome
 (3 shuffles). The main setting is W = 10, k = 2; W = 20, k = 3 and
 W = 30, k = 4 have similar chance rates and are used to check robustness.
+`r fig("nb_scheme")` illustrates the definition.
+
+```{r nb-scheme-fig, fig.width = 9, fig.height = 5.6, fig.cap = cap("nb_scheme", "The neighbourhood synteny test for one paralog pair (A, B), drawn with a window of W = 4 genes (W = 10 in the analysis). Boxes: genes along the two regions, coloured by gene family; shaded: the window of W genes on each side of A and of B. Lines: paralog pairs. A link counts as support if it joins a gene in A's window to a gene in B's window and belongs to another family than A and B. Top: a collinear block, segmental by doubletrouble's rule (at least 5 pairs in the same order) and neighbourhood-syntenic. Bottom: the same kind of duplicated region after gene order has been scrambled; too few pairs remain in order for doubletrouble, which calls A-B dispersed, but three families still link the two windows, so A-B is neighbourhood-syntenic (k = 2). Links of A's own family and links to genes outside a window are not counted.")}
+W_demo <- 4; ctr <- 8; n_pos <- 15
+p_col <- "Collinear block: segmental in doubletrouble, neighbourhood-syntenic (support = 5 families)"
+p_scr <- "Scrambled block: dispersed in doubletrouble, neighbourhood-syntenic (support = 3 families)"
+row_genes <- function(fams) {
+  f <- rep("Other genes", n_pos)
+  for (p in names(fams)) f[as.integer(p)] <- fams[[p]]
+  f
+}
+sch_genes <- rbind(
+  data.table(panel = p_col, row = "A", pos = 1:n_pos,
+             fam = row_genes(list(`5` = "F1", `6` = "F2", `7` = "F3", `8` = "A/B family", `9` = "F4", `10` = "F5"))),
+  data.table(panel = p_col, row = "B", pos = 1:n_pos,
+             fam = row_genes(list(`5` = "F1", `6` = "F2", `7` = "F3", `8` = "A/B family", `9` = "F4", `10` = "F5"))),
+  data.table(panel = p_scr, row = "A", pos = 1:n_pos,
+             fam = row_genes(list(`5` = "F1", `7` = "F2", `8` = "A/B family", `10` = "F3", `11` = "A/B family", `14` = "F4"))),
+  data.table(panel = p_scr, row = "B", pos = 1:n_pos,
+             fam = row_genes(list(`4` = "F3", `6` = "F1", `8` = "A/B family", `9` = "F4", `11` = "F2", `12` = "A/B family"))))
+sch_links <- rbind(
+  data.table(panel = p_col, from = c(8, 5, 6, 7, 9, 10), to = c(8, 5, 6, 7, 9, 10),
+             kind = c("Focal pair A-B", rep("Supporting link", 5)), fam = c("A/B family", "F1", "F2", "F3", "F4", "F5")),
+  data.table(panel = p_scr, from = c(8, 5, 7, 10, 11, 14), to = c(8, 6, 11, 4, 12, 9),
+             kind = c("Focal pair A-B", rep("Supporting link", 3), "Not counted", "Not counted"),
+             fam = c("A/B family", "F1", "F2", "F3", "A/B family", "F4")))
+sch_links[, link_col := fifelse(kind == "Supporting link", fam, kind)]
+sch_genes[, y := fifelse(row == "A", 1, 0)]
+sch_genes[, label := fifelse(fam == "A/B family" & pos == ctr, row, "")]
+fam_fill <- c("A/B family" = "grey20", F1 = "#0072B2", F2 = "#E69F00", F3 = "#009E73",
+              F4 = "#CC79A7", F5 = "#56B4E9", "Other genes" = "grey88")
+link_cols <- c(fam_fill[c("F1", "F2", "F3", "F4", "F5")], "Focal pair A-B" = "grey20", "Not counted" = "grey60")
+panels <- factor(c(p_col, p_scr), c(p_col, p_scr))
+sch_genes[, panel := factor(panel, levels(panels))]
+sch_links[, panel := factor(panel, levels(panels))]
+win <- CJ(panel = panels, y = c(0, 1))
+notes <- data.table(panel = factor(p_scr, levels(panels)), x = c(12.3, 15.1), y = c(0.42, 0.62),
+                    label = c("own family:\nnot counted", "outside A's\nwindow: not counted"))
+ggplot() +
+  geom_rect(data = win, aes(xmin = ctr - W_demo - 0.5, xmax = ctr + W_demo + 0.5, ymin = y - 0.19, ymax = y + 0.19),
+            fill = "#0072B2", alpha = 0.08) +
+  geom_segment(data = sch_links, aes(x = from, xend = to, y = 0.87, yend = 0.13, colour = link_col,
+                                     linetype = kind == "Not counted", linewidth = kind == "Focal pair A-B")) +
+  geom_tile(data = sch_genes, aes(pos, y, fill = fam), width = 0.78, height = 0.24, colour = "white") +
+  geom_text(data = sch_genes, aes(pos, y, label = label), colour = "white", fontface = "bold", size = 3.6) +
+  geom_text(data = notes, aes(x, y, label = label), size = 2.8, colour = "grey40", hjust = 0, lineheight = 0.9) +
+  geom_text(data = CJ(panel = panels, y = c(1, 0))[, label := fifelse(y == 1, "region of A", "region of B")],
+            aes(x = 0.2, y = y, label = label), hjust = 1, size = 3.2) +
+  geom_text(data = data.table(panel = panels), aes(x = ctr, y = 1.3), label = "window: W genes on each side of A and B",
+            size = 3, colour = "#0072B2") +
+  facet_wrap(~panel, ncol = 1) +
+  scale_fill_manual(values = fam_fill, breaks = names(fam_fill), name = "Gene family") +
+  scale_colour_manual(values = link_cols, guide = "none") +
+  scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "dashed"), guide = "none") +
+  scale_linewidth_manual(values = c(`FALSE` = 0.7, `TRUE` = 1.6), guide = "none") +
+  coord_cartesian(xlim = c(-1.6, 16.6), ylim = c(-0.3, 1.38), clip = "off") +
+  theme_void(base_size = 10) +
+  theme(legend.position = "bottom", strip.text = element_text(size = 9.5, face = "bold", margin = margin(b = 4)),
+        panel.spacing = unit(1.2, "lines"), plot.margin = margin(6, 6, 6, 6)) +
+  guides(fill = guide_legend(nrow = 1))
+```
 
 ```{r nbhd-support}
 nb_path <- "data/genome_duplication/neighbourhood_support.tsv.gz"
@@ -1541,6 +1603,32 @@ anc_show <- anc_tab[, .(node, label, events, ancientSD_pct = round(100 * ancient
 knitr::kable(anc_show, caption = tcap("anc", "Gene-tree duplications that are ancestrally segmental (ancientSD: segmental or neighbourhood-syntenic in at least two descendant genomes) on key branches, and the Ks of their duplicate pairs (Ks 0.05-5). Ks_below_2: % of ancientSD pairs with Ks < 2; Ks_1.5_2.6: % in the window of the Mortierellales Ks component (Section 3), for ancientSD pairs and for the other pairs of the same branch."))
 ```
 
+The ancientSD duplications of the two stems, counted as duplications (gene-tree
+events), as the genes that descend from them in today's genomes, and as copy
+pairs (one copy from each side of a duplication, within a genome) with their
+current doubletrouble classification (`r tab("anc_counts")`).
+
+```{r anc-counts}
+stems <- data.table(node = c("N12", "N10"), stem = c("Mucorales stem (N12)", "Mortierellales stem (N10)"))
+ac <- anc[node %in% stems$node]
+ac_ev <- unique(ac[, .(node, event, cls)])[, .(duplications = .N, ancientSD = sum(cls == "ancientSD")), by = node]
+ac_sd <- ac[cls == "ancientSD"]
+ac_genes <- ac_sd[, .(genes = uniqueN(c(paste(genome, sub(" .*", "", key)), paste(genome, sub(".* ", "", key)))),
+                      genomes = uniqueN(genome), pairs = .N, classified = sum(!is.na(type)),
+                      SD = sum(type %in% "SD"), TD = sum(type %in% "TD"), PD = sum(type %in% "PD"),
+                      DD = sum(type %in% "DD")), by = node]
+anc_counts <- merge(stems, merge(ac_ev, ac_genes, by = "node"), by = "node", sort = FALSE)
+anc_counts_show <- anc_counts[, .(
+  stem, `supported duplications` = fmt_n(duplications),
+  `ancientSD duplications` = sprintf("%s (%.0f%%)", fmt_n(ancientSD), 100 * ancientSD / duplications),
+  `descendant genes` = sprintf("%s (%d genomes)", fmt_n(genes), genomes),
+  `copy pairs` = fmt_n(pairs), classified = fmt_n(classified),
+  SD = sprintf("%s (%.0f%%)", fmt_n(SD), 100 * SD / classified),
+  TD = fmt_n(TD), PD = fmt_n(PD),
+  DD = sprintf("%s (%.0f%%)", fmt_n(DD), 100 * DD / classified))]
+knitr::kable(anc_counts_show, caption = tcap("anc_counts", "ancientSD duplications on the Mucorales and Mortierellales stems. Supported duplications: OrthoFinder gene-tree duplications on the stem with at least 50% support. Descendant genes: present-day copies descending from the ancientSD duplications, summed over genomes. Copy pairs: pairs of copies from the two sides of each duplication within a genome; classified: pairs that doubletrouble classified (the others were not among either gene's top 5 within-genome DIAMOND hits), with their current mode (% of classified pairs)."))
+```
+
 ```{r anc-ks-fig, fig.width = 10, fig.height = 5.5, fig.cap = cap("anc_ks", "Ks distributions (log scale, Ks 0.05-5) of the duplicate pairs of key branches, for ancientSD duplications and for the other duplications of the same branch (density curves). Dotted line: Ks = 2.")}
 ksw <- merge(ksw, anc_nodes, by = "node")
 ksw[, panel := factor(paste0(node, ": ", label), paste0(anc_nodes$node, ": ", anc_nodes$label))]
@@ -1566,6 +1654,7 @@ other <- same[group == "Other"]
 n_older_wins <- other[, sum(N12 > own)]
 n_n9_lower <- same[, sum(N9 < N12)]
 av <- function(nd, col) anc_show[node == nd][[col]]
+acn <- function(nd, col) fmt_n(anc_counts[node == nd][[col]])
 wgd_genomes <- c("gzAbsCyli1", "AbsRepe", "gzAbsGlau1", "ggRhiOryz1", "gzRhiStol1")
 n12_wo_wgd <- 100 * real10[node == "N12" & !genome %in% wgd_genomes, mean(pass)]
 top_g <- g12[order(-pct)][1:3]
@@ -1608,13 +1697,20 @@ rng <- function(v, d = 1) paste(sprintf(paste0("%.", d, "f"), range(v)), collaps
   duplicates are neighbourhood-syntenic, more than with the collinearity rule
   (`r f1(100 * nv("N10", "sd_share"))`%), consistent with a large-scale
   duplication early in the order.
-- **Ancestrally segmental duplications.** `r av("N12", "ancientSD_pct")`% of the
-  Mucorales-stem duplications are ancientSD, but their pairs are saturated
+- **Ancestrally segmental duplications.** `r acn("N12", "ancientSD")` of the
+  `r acn("N12", "duplications")` Mucorales-stem duplications
+  (`r av("N12", "ancientSD_pct")`%) and `r acn("N10", "ancientSD")` of the
+  `r acn("N10", "duplications")` Mortierellales-stem duplications
+  (`r av("N10", "ancientSD_pct")`%) are ancientSD, with
+  `r acn("N12", "genes")` and `r acn("N10", "genes")` descendant genes
+  (`r tab("anc_counts")`). Of the classified Mucorales-stem pairs,
+  `r round(100 * anc_counts[node == "N12", DD / classified])`% are now dispersed,
+  against `r round(100 * anc_counts[node == "N10", DD / classified])`% on the
+  Mortierellales stem. The Mucorales-stem pairs are saturated
   (median Ks `r av("N12", "median_Ks")`; `r av("N12", "Ks_below_2")`% below 2):
   Ks cannot date this event even when restricted to block duplicates
-  (`r tab("anc")`, `r fig("anc_ks")`). On the Mortierellales stem,
-  `r av("N10", "ancientSD_pct")`% of the duplications are ancientSD, and their
-  pairs are enriched in the Ks 1.5-2.6 window (`r av("N10", "Ks_1.5_2.6")`%
+  (`r tab("anc")`, `r fig("anc_ks")`). The ancientSD pairs of the
+  Mortierellales stem are enriched in the Ks 1.5-2.6 window (`r av("N10", "Ks_1.5_2.6")`%
   against `r av("N10", "Ks_1.5_2.6_other")`% for the other stem duplicates), so
   the Ks component shared by all Mortierellales genomes (Section 3) most
   likely reflects this event. If substitution rates are similar in the two orders, it is younger
