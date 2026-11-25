@@ -50,7 +50,7 @@ fig_ids <- c("contiguity", "nearident", "sd_contig", "landscape", "genes_dups",
              "dup_rate", "sd_share", "oxford", "asym", "exp_modes", "node_modes",
              "nb_scheme", "nb_age", "nb_same", "nb_events", "anc_ks")
 tab_ids <- c("flags", "identity", "strains", "orders", "pgls", "peaks", "orthks",
-             "nodes", "macro", "asym", "exp_modes", "nb_calib", "nb_nodes", "anc", "anc_counts")
+             "nodes", "macro", "asym", "absidia", "exp_modes", "nb_calib", "nb_nodes", "anc", "anc_counts")
 fig  <- function(id) paste("Figure", match(id, fig_ids))
 tab  <- function(id) paste("Table", match(id, tab_ids))
 cap  <- function(id, text) paste0("**", fig(id), ".** ", text)
@@ -741,7 +741,9 @@ lic <- mp("LicRamo"); lic_n <- sd_n[genome == "LicRamo", N]
   `r round(mp("AbsRepe")$Ks, 2)`), so it is shared by these two species.
   Whether it is shared with *A. glauca* is unclear: their ortholog Ks
   (`r om("Within Absidia (A. repens / A. glauca)")`) is close to the peak and
-  near saturation, and *A. glauca* has far fewer segmental pairs.
+  near saturation, and *A. glauca* has far fewer segmental pairs. The gene
+  trees show that it is shared, with part of the rediploidization completed
+  after the split (Section 4.5).
 - **The *R. oryzae* event is probably younger than its split from
   *R. microsporus*** (ortholog Ks `r om("Within Rhizopus (R. oryzae / R. microsporus)")`
   against a peak at `r round(mp("ggRhiOryz1")$Ks, 2)`; both near saturation,
@@ -1072,6 +1074,86 @@ ggplot(asym_long, aes(families, cmp, fill = pattern)) +
   theme(legend.position = "bottom")
 ```
 
+## The two *Absidia* branches: one WGD, partly rediploidized after a speciation
+
+The *Absidia* duplications are split between the branch before *A. glauca*
+diverged (N40) and the branch after it (N46). Two rounds of genome-wide
+duplication within this short time are unlikely. After a WGD, the two copies of
+a region can keep recombining as one (tetrasomic inheritance) until the genome
+is rediploidized. If a speciation happens before that is complete, the copies
+of some regions start diverging before the split, and those of other regions
+only afterwards, independently in each daughter lineage. In gene trees, the
+first appear as duplications before the speciation (ancestral ohnolog
+resolution, AORe), the second as separate duplications in each lineage
+(lineage-specific ohnolog resolution, LORe), as after the salmonid WGD.
+This predicts that (1) *A. glauca* has both copies of the N40 duplications,
+(2) it is outside the N46 duplications but often has two copies of its own
+in the same families, forming a duplication on the *A. glauca* branch, and
+(3) N46 pairs are younger than N40 pairs.
+
+```{r absidia-lore}
+gl_pre <- paste0(gsub(".", "_", of_names[["gzAbsGlau1"]], fixed = TRUE), "_")
+has_gla <- function(x) vapply(strsplit(x, ", ", fixed = TRUE), function(v) any(startsWith(v, gl_pre)), FALSE)
+abs_ev <- sup[node %in% c("N40", "N46")]
+abs_ev[, `:=`(s1 = has_gla(genes1), s2 = has_gla(genes2))]
+pair_ks_all <- unique(pairs[near_ident == FALSE, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), Ks)],
+                      by = c("genome", "key"))
+abs_ks <- merge(cross[node %in% c("N40", "N46"), .(genome, key, node)], pair_ks_all, by = c("genome", "key"))[
+  Ks <= 5, .(pairs_with_Ks = .N, median_Ks = round(median(Ks), 2)), by = node]
+abs_tab <- abs_ev[, .(duplications = .N, glauca_both = round(100 * mean(s1 & s2)),
+                      glauca_one = round(100 * mean(xor(s1, s2))), glauca_absent = round(100 * mean(!s1 & !s2))),
+                  by = node]
+abs_tab <- merge(merge(key_nodes, abs_tab, by = "node"), abs_ks, by = "node")[order(node == "N46")]
+knitr::kable(abs_tab, caption = tcap("absidia", "Supported gene-tree duplications on the two Absidia branches: percentage in which A. glauca has genes on both sides of the duplication (both copies), on one side, or on neither (A. glauca outside the duplicated subtree), and the median Ks of the duplicate pairs in A. cylindrospora and A. repens (and A. glauca for N40)."))
+
+# Families duplicated only on N46: A. glauca copy number, and whether A. glauca's
+# copies form their own (terminal) duplication in the gene tree
+gla_term <- unique(dups[node == "gzAbsGlau1", og])
+only46 <- setdiff(abs_ev[node == "N46", og], abs_ev[node == "N40", og])
+gla_n <- cn[genome == "gzAbsGlau1", .(og = Orthogroup, gla = n)]
+hal_n <- cn[genome == "HalRadi", .(og = Orthogroup, hal = n)]
+lore <- merge(data.table(og = only46), gla_n, by = "og")
+bg <- merge(gla_n[gla >= 2], hal_n[hal >= 1], by = "og")[!og %in% abs_ev$og]
+lore_s <- list(n = nrow(lore), multi = lore[gla >= 2, .N], single = lore[gla == 1, .N],
+               term = 100 * lore[gla >= 2, mean(og %in% gla_term)], bg_term = 100 * mean(bg$og %in% gla_term))
+abs_genes <- gen[genome %in% c("gzAbsGlau1", "gzAbsCyli1", "AbsRepe"), .(genome, genes, busco = qc$Busco[match(genome, qc$genome_id)])]
+```
+
+```{r absidia-values}
+at <- function(nd, col) abs_tab[node == nd][[col]]
+```
+
+- **Shared before the split.** *A. glauca* has both copies of
+  `r at("N40", "glauca_both")`% of the `r fmt_n(at("N40", "duplications"))`
+  N40 duplications (`r tab("absidia")`): these are duplications shared by all
+  three species.
+- **Resolved after the split.** *A. glauca* lies outside
+  `r at("N46", "glauca_absent")`% of the `r fmt_n(at("N46", "duplications"))`
+  N46 duplications. In `r fmt_n(lore_s$multi)` of the `r fmt_n(lore_s$n)`
+  families duplicated only on N46, *A. glauca* nevertheless has two or more
+  copies, and in `r round(lore_s$term)`% of these its copies form their own
+  duplication on the *A. glauca* branch (`r round(lore_s$bg_term)`% in other
+  families where *A. glauca* has several copies). The same ancestral
+  duplication thus appears as two lineage-specific duplications.
+- **Younger pairs after the split.** The N46 pairs have a median Ks of
+  `r at("N46", "median_Ks")`, against `r at("N40", "median_Ks")` for the N40
+  pairs, as expected if they started diverging later. Each genome has a single
+  segmental Ks peak (`r tab("peaks")`), not two.
+- **Gene loss in *A. glauca*.** In `r fmt_n(lore_s$single)` N46-only families
+  *A. glauca* has a single copy. It has fewer genes
+  (`r fmt_n(abs_genes[genome == "gzAbsGlau1", genes])`, against
+  `r paste(fmt_n(abs_genes[genome != "gzAbsGlau1", genes]), collapse = " and ")`)
+  and a less complete annotation (BUSCO `r abs_genes[genome == "gzAbsGlau1", busco]`%,
+  against `r abs_genes[genome == "gzAbsCyli1", busco]`% for *A. cylindrospora*),
+  which also explains its smaller number of segmental pairs.
+- **Conclusion.** One WGD in the *Absidia* ancestor, before *A. glauca*
+  diverged, with rediploidization completed for part of the genome only after
+  the split (LORe), and more gene loss or missing annotation in *A. glauca*,
+  explains the two-branch signal without a second round of duplication. The
+  species tree is not in doubt: *A. cylindrospora* and *A. repens* are close
+  (ortholog Ks `r om("Within Absidia (A. cylindrospora / A. repens)")`) and
+  *A. glauca* clearly outside (`r om("Within Absidia (A. repens / A. glauca)")`).
+
 ## Conclusion
 
 ```{r conclusion-4-values}
@@ -1141,9 +1223,10 @@ conc_nodes <- internal[dups >= 500][order(-per_og)][1:2]
   (ratio `r a("Umbelopsidales", "Mortierellales", "ratio")`).
 - **Gene trees resolve two questions from Section 3.** The *Rhizopus* burst
   maps to the branch before the split of *R. oryzae* and *R. stolonifer* (N32),
-  so their duplications are shared. The *Absidia* burst is split between the
-  branch before *A. glauca* diverged (N40) and the branch after it (N46), so
-  part of it may be shared with *A. glauca*.
+  so their duplications are shared. The *Absidia* burst, split between the
+  branches before and after *A. glauca* diverged (N40, N46), is one WGD before
+  that split whose rediploidization was partly completed after it
+  (Section 4.5).
 - **Mortierellales show their own early event.** Duplicates of the
   Mortierellales stem and the two following nodes (N10, N13, N19) are
   `r paste(pct(mort_early), collapse = "-")`% segmental, more than those of
