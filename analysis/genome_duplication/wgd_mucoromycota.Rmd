@@ -47,9 +47,10 @@ fetch <- function(paths) {
 # Figure and table numbers, in order of appearance
 fig_ids <- c("contiguity", "nearident", "sd_contig", "landscape", "genes_dups",
              "ks_heat", "ks_peaks", "orth_ks",
-             "dup_rate", "sd_share", "oxford", "asym", "exp_modes", "node_modes")
+             "dup_rate", "sd_share", "oxford", "asym", "exp_modes", "node_modes",
+             "nb_age", "nb_same", "nb_events", "anc_ks")
 tab_ids <- c("flags", "identity", "strains", "orders", "pgls", "peaks", "orthks",
-             "nodes", "macro", "asym", "exp_modes")
+             "nodes", "macro", "asym", "exp_modes", "nb_calib", "nb_nodes", "anc")
 fig  <- function(id) paste("Figure", match(id, fig_ids))
 tab  <- function(id) paste("Table", match(id, tab_ids))
 cap  <- function(id, text) paste0("**", fig(id), ".** ", text)
@@ -1158,9 +1159,9 @@ conc_nodes <- internal[dups >= 500][order(-per_og)][1:2]
   would leave, but the decisive evidence (collinear duplicates, 1:2 synteny)
   cannot be obtained, because gene order in Mucorales has been scrambled since.
   A burst of small-scale duplication combined with gene-tree errors at a deep
-  node cannot be excluded. A model-based test (e.g. Whale), which compares WGD
-  and no-WGD models while accounting for gene-tree uncertainty, is the
-  remaining option.
+  node cannot be excluded with these tests. Section 6 revisits the
+  collinearity test with a measure of synteny that does not depend on gene
+  order.
 
 # Copy number with microsynteny
 
@@ -1319,7 +1320,314 @@ nmod <- function(nd, ty) round(node_modes[node == nd][[ty]], 1)
 - **Microsynteny therefore cannot separate the two explanations for the
   Mucorales stem burst.** Its duplicates look like those of a WGD whose blocks
   have eroded, and unlike tandem family expansions, but dispersed small-scale
-  duplication would look the same.
+  duplication would look the same, as long as segmental duplicates are
+  defined by collinearity. Section 6 uses a definition that tolerates
+  scrambled gene order.
+
+# Order-free synteny of duplicates
+
+doubletrouble calls a pair segmental only if it is an anchor of a collinear
+block: at least 5 paralog pairs in the same order, with gaps of at most 25
+genes. Gene order within chromosomes is scrambled much faster in Mucorales and
+Umbelopsidales than in Mortierellales (synteny analysis), which breaks blocks
+into pieces too short for this rule even when the duplicated regions still
+share their gene content. A duplicate pair that arose in a segmental duplication
+or WGD is then classified as dispersed. If so, the same ancestral duplication
+can be segmental in one genome and dispersed in another.
+
+**Neighbourhood synteny.** For each paralog pair (A, B), the genes within
+W genes of A and of B were compared, ignoring order and orientation. The
+support of the pair is the number of different gene families (orthogroups,
+other than the family of A and B) with a paralog pair linking a gene near A
+to a gene near B. A pair is *neighbourhood-syntenic* if its support reaches a
+threshold k, i.e. A and B lie in regions that were duplicated together with
+genes of at least k other families. Near-identical pairs were excluded as
+pairs and as support, and pairs whose neighbourhoods overlap (closer than 2W
+genes on one sequence) were not tested. The rate expected by chance was
+measured by repeating the test after shuffling gene order in each genome
+(3 shuffles). The main setting is W = 10, k = 2; W = 20, k = 3 and
+W = 30, k = 4 have similar chance rates and are used to check robustness.
+
+```{r nbhd-support}
+nb_path <- "data/genome_duplication/neighbourhood_support.tsv.gz"
+nb_k <- c(`10` = 2, `20` = 3, `30` = 4)
+if (!file.exists(nb_path)) {
+  nbhd_support <- function(pp, ord, fam, W) {
+    pp <- merge(pp, ord[, .(a = gene, sa = seq, ra = rank)], by = "a")
+    pp <- merge(pp, ord[, .(b = gene, sb = seq, rb = rank)], by = "b")
+    pp[, `:=`(fam_ab = fam[a], tested = !(sa == sb & abs(ra - rb) <= 2 * W))]
+    links <- rbind(pp[, .(x = a, y = b, sx = sa, rx = ra, sy = sb, ry = rb)],
+                   pp[, .(x = b, y = a, sx = sb, rx = rb, sy = sa, ry = ra)])
+    links[, fam_xy := fam[x]]
+    foc <- pp[tested == TRUE, .(a, b, sa, sb, fam_ab, alo = ra - W, ahi = ra + W, blo = rb - W, bhi = rb + W)]
+    j <- links[foc, on = .(sx == sa, rx >= alo, rx <= ahi, sy == sb, ry >= blo, ry <= bhi),
+               nomatch = NULL, allow.cartesian = TRUE, .(a = i.a, b = i.b, x, y, fam_xy, fam_ab = i.fam_ab)]
+    j <- j[x != a & y != b & x != b & y != a & (is.na(fam_xy) | is.na(fam_ab) | fam_xy != fam_ab)]
+    j[is.na(fam_xy), fam_xy := paste0("gene:", pmin(x, y))]
+    s <- j[, .(support = uniqueN(fam_xy)), by = .(a, b)]
+    out <- merge(pp[tested == TRUE, .(a, b)], s, by = c("a", "b"), all.x = TRUE)
+    out[is.na(support), support := 0L]
+    out
+  }
+  nb <- rbindlist(lapply(gen$genome, function(g) {
+    pp <- pairs[genome == g & !near_ident, .(a = dup1, b = dup2)]
+    ord <- unique(gp[genome == g, .(gene = geneID, seq = seqname, start)], by = "gene")
+    setorder(ord, seq, start)
+    ord[, rank := seq_len(.N), by = seq]
+    fam <- og_genes[genome == g, setNames(og, gene)]
+    rbindlist(lapply(as.numeric(names(nb_k)), function(W) {
+      runs <- list(real = ord)
+      for (s in 1:3) { set.seed(s); o <- copy(ord); o[, gene := sample(gene)]; runs[[paste0("null", s)]] <- o }
+      rbindlist(lapply(names(runs), function(r) nbhd_support(pp, runs[[r]], fam, W)[, `:=`(W = W, run = r)]))
+    }))[, genome := g]
+  }))
+  fwrite(nb, nb_path, sep = "\t")
+}
+nb <- fread(nb_path)
+nb[, `:=`(key = paste(pmin(a, b), pmax(a, b)), pass = support >= nb_k[as.character(W)], is_null = run != "real")]
+nb <- merge(nb, pair_key, by = c("genome", "key"), all.x = TRUE)
+nb <- merge(nb, gen[, .(genome, order)], by = "genome")
+```
+
+## Calibration
+
+```{r nb-calib}
+calib <- nb[, .(chance = 100 * mean(pass[is_null]), real = 100 * mean(pass[!is_null]),
+                SD = 100 * mean(pass[!is_null & type == "SD"]), DD = 100 * mean(pass[!is_null & type == "DD"])),
+            by = .(W, k = nb_k[as.character(W)], order)][order(W, order)]
+calib[, DD_over_chance := DD / chance]
+num <- c("chance", "real", "SD", "DD", "DD_over_chance")
+calib_show <- copy(calib)[, (num) := lapply(.SD, function(v) signif(v, 3)), .SDcols = num]
+knitr::kable(calib_show, caption = tcap("nb_calib", "Percentage of tested paralog pairs that are neighbourhood-syntenic, by setting (window W, threshold k) and order: in genomes with shuffled gene order (chance), in the real genomes (real), and among doubletrouble's segmental (SD) and dispersed (DD) pairs. DD_over_chance: dispersed pairs passing relative to chance."))
+```
+
+## Neighbourhood synteny of the duplicates of each branch
+
+```{r nb-nodes}
+nbx <- merge(cross[, .(genome, key, node, event)], nb[, .(genome, key, W, run, is_null, pass)],
+             by = c("genome", "key"))
+nb_node <- nbx[, .(tested = sum(!is_null) / 1, real = 100 * mean(pass[!is_null]), chance = 100 * mean(pass[is_null])),
+               by = .(node, W)]
+nb_node[, tested := tested]
+nb_ev <- nbx[W == 10, .(any = any(pass)), by = .(node, event, run)][
+  , .(events = sum(run == "real"), ev_real = 100 * mean(any[run == "real"]), ev_chance = 100 * mean(any[run != "real"])), by = node]
+nb_w <- dcast(nb_node, node ~ W, value.var = c("real", "chance", "tested"))
+nb_w <- merge(nb_w, nb_ev, by = "node")
+nb_w <- merge(nb_w, nodes[, .(node, ntips, clade_order, age_start, age_end)], by = "node")
+```
+
+```{r nb-age-fig, fig.width = 8, fig.height = 5.5, fig.cap = cap("nb_age", "Percentage of neighbourhood-syntenic pairs (W = 10, k = 2) among the duplicates of each internal node against the age of the node (square-root scale). Nodes with at least 200 tested pairs. Dashed line: rate in genomes with shuffled gene order. Compare with the collinearity-based Figure 10.")}
+nba <- nb_w[ntips > 1 & !is.na(age_end) & tested_10 >= 200]
+nb_chance <- nb[W == 10 & is_null == TRUE, 100 * mean(pass)]
+ggplot(nba, aes(age_end, real_10, colour = clade_order)) +
+  geom_hline(yintercept = nb_chance, linetype = "dashed", colour = "grey50") +
+  geom_point(aes(size = tested_10), alpha = 0.8) +
+  geom_text_repel(data = merge(nba, key_nodes, by = "node"), aes(label = paste0(node, ": ", label)),
+                  size = 3, show.legend = FALSE, min.segment.length = 0) +
+  scale_y_sqrt(breaks = c(0.2, 1, 5, 10, 25, 50)) +
+  scale_colour_manual(values = c(order_cols, "Several orders" = "grey40"), name = NULL) +
+  scale_size_area(max_size = 8, name = "Tested pairs", breaks = c(1000, 10000, 50000)) +
+  labs(x = "Age of node (relative time)", y = "Neighbourhood-syntenic pairs (%)") +
+  theme(legend.position = "bottom", legend.box = "vertical")
+```
+
+```{r nb-nodes-table}
+nb_tab <- merge(key_nodes[node != "N8"], nb_w, by = "node", sort = FALSE)
+nb_tab <- merge(nb_tab, nodes[, .(node, sd_share)], by = "node", sort = FALSE)
+nb_tab <- nb_tab[, .(node, label, tested = tested_10, collinear_SD = round(100 * sd_share, 1),
+                     syntenic = round(real_10, 1), chance = round(chance_10, 2),
+                     enrichment = round(real_10 / chance_10), syntenic_W20 = round(real_20, 1),
+                     syntenic_W30 = round(real_30, 1), events, events_syntenic = round(ev_real, 1),
+                     events_chance = round(ev_chance, 1))]
+knitr::kable(nb_tab, caption = tcap("nb_nodes", "Neighbourhood synteny of the duplicates of key branches. tested: duplicate pairs tested (W = 10). collinear_SD: % segmental pairs by doubletrouble's collinearity rule (Section 4.2). syntenic, chance: % neighbourhood-syntenic pairs (W = 10, k = 2) in the real genomes and with shuffled gene order; syntenic_W20, syntenic_W30: the same with W = 20, k = 3 and W = 30, k = 4. events_syntenic: % of the gene-tree duplications with a neighbourhood-syntenic pair in at least one descendant genome; events_chance: the same with shuffled gene order."))
+```
+
+## Same genomes, different ages
+
+Gene order is scrambled at different rates in different genomes, so the
+duplicates of different branches are best compared within the same genomes.
+For each younger Mucorales node, the genomes below it were taken, and the
+neighbourhood synteny of the node's own duplicates was compared with that of
+the Mucorales-stem (N12) and N9 duplicates in the same genomes. Synteny only
+decays with time, so older duplicates that are more often syntenic than
+younger ones must more often have arisen in multi-gene (segmental or
+whole-genome) duplications.
+
+```{r nb-same}
+of_desc <- function(nd) extract.clade(of_tree, nt + match(nd, of_tree$node.label))$tip.label
+real10 <- nbx[W == 10 & !is_null]
+young <- nodes[clade_order == "Mucorales" & ntips > 2 & !is.na(age_end) & age_end < nv("N12", "age_end")]
+same <- rbindlist(lapply(young$node, function(nd) {
+  gs <- of_desc(nd); y <- real10[genome %in% gs]
+  data.table(node = nd, genomes = length(gs), own_n = y[node == nd, .N],
+             own = 100 * y[node == nd, mean(pass)], N12 = 100 * y[node == "N12", mean(pass)],
+             N9 = 100 * y[node == "N9", mean(pass)])
+}))[own_n >= 200]
+same <- merge(same, nodes[, .(node, age_start, age_end)], by = "node")
+# nodes on or next to the branches of the recent WGDs and the Lichtheimia signal
+wgd_linked <- c("N40", "N23", "N31", "N45", "N37")
+same[, group := fifelse(node %in% wgd_linked, "Near a recent WGD or the Lichtheimia signal", "Other")]
+same[, lab := sprintf("%s (%.0f-%.0f; %d genomes)", node, age_end, age_start, genomes)]
+same <- same[order(-age_start)]
+```
+
+```{r nb-same-fig, fig.width = 9, fig.height = 6, fig.cap = cap("nb_same", "Neighbourhood-syntenic pairs (%) among the duplicates of younger Mucorales nodes (own) and among the Mucorales-stem (N12) and N9 duplicates in the same genomes. Each row: one node, with its age range (relative time) and the number of genomes below it. Rows marked with an asterisk are nodes on or next to the branches of the recent Absidia and Rhizopus WGDs or the Lichtheimia signal.")}
+sl <- melt(same[, .(lab, group, own, N12, N9)], id.vars = c("lab", "group"), variable.name = "dups", value.name = "pct")
+sl[, lab := factor(ifelse(group == "Other", lab, paste0(lab, " *")),
+                   rev(ifelse(same$group == "Other", same$lab, paste0(same$lab, " *"))))]
+sl[, dups := factor(dups, c("own", "N12", "N9"), c("Own duplicates (younger)", "N12 duplicates (Mucorales stem)", "N9 duplicates"))]
+ggplot(sl, aes(pct, lab)) +
+  geom_line(aes(group = lab), colour = "grey80") +
+  geom_point(aes(colour = dups), size = 2.5) +
+  scale_x_sqrt(breaks = c(0.5, 2, 5, 10, 25, 50)) +
+  scale_colour_manual(values = c("grey50", "#0072B2", "#E69F00"), name = NULL) +
+  labs(x = "Neighbourhood-syntenic pairs (%)", y = NULL) +
+  theme(legend.position = "bottom")
+```
+
+## Mucorales-stem duplications across genomes
+
+```{r nb-events-fig, fig.width = 10, fig.height = 5, fig.cap = cap("nb_events", "Left: number of Mucorales genomes in which a Mucorales-stem (N12) duplication has a neighbourhood-syntenic pair, for the real genomes and with shuffled gene order (mean of 3 shuffles); duplications syntenic in no genome are not shown. Right: neighbourhood-syntenic pairs (%) among the N12 duplicates in each Mucorales genome, in species-tree order.")}
+ev12 <- nbx[W == 10 & node == "N12", .(n_genomes = uniqueN(genome[pass])), by = .(event, run)]
+ev12[, bin := cut(n_genomes, c(0, 1, 2, 5, 10, 20, Inf), labels = c("1", "2", "3-5", "6-10", "11-20", ">20"))]
+evh <- ev12[n_genomes > 0, .N, by = .(bin, real = run == "real")][, N := ifelse(real, N, N / 3)]
+evh[, set := factor(ifelse(real, "Real genomes", "Shuffled gene order"), c("Real genomes", "Shuffled gene order"))]
+p_ev <- ggplot(evh, aes(bin, N, fill = set)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+  scale_fill_manual(values = c("#0072B2", "grey70"), name = NULL) +
+  labs(x = "Genomes in which the duplication is syntenic", y = "N12 duplications") +
+  theme(legend.position = "bottom")
+g12 <- real10[node == "N12", .(pct = 100 * mean(pass), n = .N), by = genome]
+g12[, genome := factor(genome, tip_order)]
+p_g <- ggplot(g12, aes(pct, genome)) +
+  geom_col(fill = order_cols[["Mucorales"]], width = 0.75) +
+  labs(x = "Syntenic N12 pairs (%)", y = NULL) +
+  theme(axis.text.y = element_text(size = 6.5))
+p_ev + p_g + plot_layout(widths = c(1.3, 1))
+```
+
+## Ancestrally segmental duplications (ancientSD) and their Ks
+
+A gene-tree duplication is *ancestrally segmental* (ancientSD) if, in at least
+two descendant genomes, one of its duplicate pairs is segmental (doubletrouble)
+or neighbourhood-syntenic (W = 10, k = 2). All pairs of such a duplication,
+in every descendant genome, are then counted as ancientSD, including those now
+classified as dispersed: the duplication arose in a block, whatever its state
+today. Requiring two genomes keeps chance passes rare (Section 6.4). Their Ks
+distributions show whether these block duplications can be dated.
+
+```{r anc-class}
+nb_real10 <- nb[W == 10 & !is_null, .(genome, key, nb_pass = pass)]
+anc <- merge(cross[, .(genome, key, node, event, type)], nb_real10, by = c("genome", "key"), all.x = TRUE)
+anc[, syn := type %in% "SD" | (!is.na(nb_pass) & nb_pass)]
+anc <- merge(anc, anc[, .(syn_genomes = uniqueN(genome[syn])), by = event], by = "event")
+anc[, cls := fcase(syn_genomes >= 2, "ancientSD", syn_genomes == 1, "Syntenic in 1 genome",
+                   default = "No synteny")]
+pair_ks <- unique(pairs[, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), Ks)], by = c("genome", "key"))
+anc <- merge(anc, pair_ks, by = c("genome", "key"), all.x = TRUE)
+anc_nodes <- key_nodes[node != "N8"]
+anc_ev <- unique(anc[, .(event, node, cls)])[node %in% anc_nodes$node,
+  .(events = .N, ancientSD = sum(cls == "ancientSD")), by = node]
+ksw <- anc[node %in% anc_nodes$node & !is.na(Ks) & Ks >= 0.05 & Ks <= 5]
+ksw[, set := fifelse(cls == "ancientSD", "ancientSD", "other")]
+anc_ks <- ksw[, .(pairs = .N, median_Ks = median(Ks), below2 = 100 * mean(Ks < 2),
+                  window = 100 * mean(Ks > 1.5 & Ks < 2.6)), by = .(node, set)]
+anc_ks_w <- dcast(anc_ks, node ~ set, value.var = c("pairs", "median_Ks", "below2", "window"))
+anc_tab <- merge(anc_nodes, merge(anc_ev, anc_ks_w, by = "node"), by = "node", sort = FALSE)
+anc_show <- anc_tab[, .(node, label, events, ancientSD_pct = round(100 * ancientSD / events),
+                        ancientSD_pairs = pairs_ancientSD, median_Ks = round(median_Ks_ancientSD, 2),
+                        Ks_below_2 = round(below2_ancientSD, 1),
+                        Ks_1.5_2.6 = round(window_ancientSD, 1), Ks_1.5_2.6_other = round(window_other, 1))]
+knitr::kable(anc_show, caption = tcap("anc", "Gene-tree duplications that are ancestrally segmental (ancientSD: segmental or neighbourhood-syntenic in at least two descendant genomes) on key branches, and the Ks of their duplicate pairs (Ks 0.05-5). Ks_below_2: % of ancientSD pairs with Ks < 2; Ks_1.5_2.6: % in the window of the Mortierellales Ks component (Section 3), for ancientSD pairs and for the other pairs of the same branch."))
+```
+
+```{r anc-ks-fig, fig.width = 10, fig.height = 5.5, fig.cap = cap("anc_ks", "Ks distributions (log scale, Ks 0.05-5) of the duplicate pairs of key branches, for ancientSD duplications and for the other duplications of the same branch (density curves). Dotted line: Ks = 2.")}
+ksw <- merge(ksw, anc_nodes, by = "node")
+ksw[, panel := factor(paste0(node, ": ", label), paste0(anc_nodes$node, ": ", anc_nodes$label))]
+ggplot(ksw, aes(Ks, colour = set)) +
+  geom_density(adjust = 0.8, linewidth = 0.7) +
+  geom_vline(xintercept = 2, linetype = "dotted") +
+  facet_wrap(~panel, ncol = 4, scales = "free_y") +
+  scale_x_log10(breaks = c(0.05, 0.2, 0.5, 1, 2, 5), labels = c(0.05, 0.2, 0.5, 1, 2, 5)) +
+  scale_colour_manual(values = c(ancientSD = "#D55E00", other = "grey55"), name = NULL) +
+  labs(x = "Ks", y = "Density") +
+  theme(legend.position = "bottom", strip.text = element_text(size = 8))
+```
+
+## Conclusion
+
+```{r conclusion-6-values}
+cb <- function(o, col) calib[W == 10 & order == o][[col]]
+nw <- function(nd, col) nb_w[node == nd][[col]]
+ev12_real <- ev12[run == "real"]
+ev12_multi <- ev12_real[, mean(n_genomes >= 2)]
+ev12_multi_null <- ev12[run != "real", mean(n_genomes >= 2)]
+other <- same[group == "Other"]
+n_older_wins <- other[, sum(N12 > own)]
+n_n9_lower <- same[, sum(N9 < N12)]
+av <- function(nd, col) anc_show[node == nd][[col]]
+wgd_genomes <- c("gzAbsCyli1", "AbsRepe", "gzAbsGlau1", "ggRhiOryz1", "gzRhiStol1")
+n12_wo_wgd <- 100 * real10[node == "N12" & !genome %in% wgd_genomes, mean(pass)]
+top_g <- g12[order(-pct)][1:3]
+gname <- function(g) gen$species[match(g, gen$genome)]
+rng <- function(v, d = 1) paste(sprintf(paste0("%.", d, "f"), range(v)), collapse = "-")
+```
+
+- **The test is specific and sensitive.** With shuffled gene order only
+  `r rng(calib[W == 10, chance], 2)`% of pairs pass, whereas
+  `r rng(calib[W == 10 & order != "Umbelopsidales", SD], 0)`% of doubletrouble's
+  segmental pairs in Mortierellales and Mucorales do (`r tab("nb_calib")`).
+- **Many "dispersed" duplicates are eroded segmental duplicates.**
+  `r f1(cb("Mucorales", "DD"))`% of the dispersed pairs in Mucorales and
+  `r f1(cb("Mortierellales", "DD"))`% in Mortierellales are
+  neighbourhood-syntenic, `r round(cb("Mucorales", "DD_over_chance"))` and
+  `r round(cb("Mortierellales", "DD_over_chance"))` times the chance rate.
+- **The Mucorales-stem duplicates are syntenic far above chance.**
+  `r f1(nw("N12", "real_10"))`% of the N12 pairs pass,
+  `r round(nw("N12", "real_10") / nw("N12", "chance_10"))` times the chance rate,
+  against `r f1(nw("N9", "real_10"))`% for the older N9 duplicates; the result
+  holds with the wider windows (`r tab("nb_nodes")`, `r fig("nb_age")`).
+  `r f1(nw("N12", "ev_real"))`% of the N12 duplications are syntenic in at
+  least one Mucorales genome (chance `r f1(nw("N12", "ev_chance"))`%), and
+  `r pct(ev12_multi)`% in two or more (chance `r pct(ev12_multi_null, 1)`%),
+  while the same duplications are dispersed in other genomes
+  (`r fig("nb_events")`). The genomes that keep the most are those of
+  `r paste(sprintf("%s (%.0f%%)", gname(top_g$genome), top_g$pct), collapse = ", ")`.
+- **They are more syntenic than younger duplicates in the same genomes.** In
+  `r n_older_wins` of `r nrow(other)` younger Mucorales nodes (excluding those
+  next to the recent WGDs and the *Lichtheimia* signal), the N12 duplicates
+  are more often syntenic than the node's own, younger duplicates in the same
+  genomes (`r fig("nb_same")`), and the older N9 duplicates are less syntenic
+  than the N12 duplicates in `r n_n9_lower` of `r nrow(same)`. Since synteny
+  decays with time, the Mucorales-stem duplications must more often have
+  arisen as multi-gene duplications than the later duplications in the same
+  genomes. The signal does not come from duplicates of the recent WGDs being
+  misplaced on N12: without the *Absidia* and *Rhizopus* genomes,
+  `r f1(n12_wo_wgd)`% of the N12 pairs are syntenic.
+- **Mortierellales.** `r f1(nw("N10", "real_10"))`% of the Mortierellales-stem
+  duplicates are neighbourhood-syntenic, more than with the collinearity rule
+  (`r f1(100 * nv("N10", "sd_share"))`%), consistent with a large-scale
+  duplication early in the order.
+- **Ancestrally segmental duplications.** `r av("N12", "ancientSD_pct")`% of the
+  Mucorales-stem duplications are ancientSD, but their pairs are saturated
+  (median Ks `r av("N12", "median_Ks")`; `r av("N12", "Ks_below_2")`% below 2):
+  Ks cannot date this event even when restricted to block duplicates
+  (`r tab("anc")`, `r fig("anc_ks")`). On the Mortierellales stem,
+  `r av("N10", "ancientSD_pct")`% of the duplications are ancientSD, and their
+  pairs are enriched in the Ks 1.5-2.6 window (`r av("N10", "Ks_1.5_2.6")`%
+  against `r av("N10", "Ks_1.5_2.6_other")`% for the other stem duplicates), so
+  the Ks component shared by all Mortierellales genomes (Section 3) most
+  likely reflects this event. If substitution rates are similar in the two orders, it is younger
+  than the Mucorales-stem event, perhaps late on the long Mortierellales stem.
+- **What this adds.** With collinearity, the Mucorales-stem burst showed no
+  sign of block duplication. With an order-free measure it does: its
+  duplicates arose in duplicated regions far more often than expected by
+  chance and than later duplicates, but are now scattered because gene order
+  has been scrambled since. Together with the breadth of the burst and the
+  parallel retention of copies (Section 4), this is the evidence for a
+  large-scale duplication, most simply a WGD, on the Mucorales stem. It does
+  not exclude several large segmental duplications on that branch, which a
+  model-based test (e.g. Whale) could address.
 
 # Summary {-}
 
@@ -1346,20 +1654,31 @@ nmod <- function(nd, ty) round(node_modes[node == nd][[ty]], 1)
   Mucorales stem (`r round(nv("N12", "rate") / med_rate, 1)` times the median
   rate), not on the branch shared with Umbelopsidales. The burst is spread
   across many gene families and its copies were retained in parallel across
-  Mucorales, as after a WGD. But the hallmark evidence cannot be obtained: Ks
-  is saturated at that age, the duplicates are no longer collinear, and there
-  is no macrosynteny between the orders for a 1:2 test. A WGD on the Mucorales
-  stem is plausible but not demonstrated; a model-based test (Whale) is the
-  remaining option.
-- **Where the extra copies are.** Families expanded in Mucorales gained
-  dispersed copies, not tandem arrays: consistent with a WGD whose collinear
-  blocks have since been scrambled, but not distinguishable from dispersed
-  small-scale duplication. Families expanded in *Absidia* and *Rhizopus* are
-  still largely in collinear blocks.
-- **Mortierellales.** Collinear duplicates mapped to the Mortierellales stem
-  and earliest nodes, collinear expansions of gene families, and a shared Ks
-  component near saturation together suggest a large-scale duplication near
-  the base of Mortierellales.
+  Mucorales, as after a WGD. Ks is saturated at that age, there is no
+  macrosynteny between the orders for a 1:2 test, and the duplicates are no
+  longer collinear: families expanded in Mucorales gained dispersed copies,
+  not tandem arrays.
+- **Synteny without gene order.** Many "dispersed" duplicates are eroded
+  segmental duplicates. Measured without gene order, the Mucorales-stem
+  duplicates still lie in duplicated neighbourhoods
+  `r round(nw("N12", "real_10") / nw("N12", "chance_10"))` times more often than
+  by chance, half of these duplications are syntenic in at least one Mucorales
+  genome, and they are more syntenic than younger duplicates in the same
+  genomes. They therefore arose in multi-gene duplications, and their
+  collinearity was lost later through the scrambling of gene order. With the
+  breadth and parallel retention of the burst, this makes a large-scale
+  duplication on the Mucorales stem, most simply the WGD proposed by
+  Corrochano et al., the best explanation; a model-based test (Whale) could
+  still separate a single WGD from several large segmental duplications.
+  Families expanded in *Absidia* and *Rhizopus* are still largely in
+  collinear blocks.
+- **Mortierellales.** Collinear and neighbourhood-syntenic duplicates mapped
+  to the Mortierellales stem and earliest nodes, and collinear expansions of
+  gene families, suggest a large-scale duplication on the Mortierellales stem.
+  Its ancestrally segmental duplicates make up the Ks component near 2.4
+  shared by all Mortierellales genomes, whereas those of the Mucorales stem
+  are saturated, so the Mortierellales event is probably the younger of the
+  two.
 
 # Session info {-}
 

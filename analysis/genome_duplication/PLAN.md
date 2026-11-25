@@ -70,6 +70,16 @@ e. Later, if a-d are promising: model-based test (Whale) of WGD vs no WGD on
 For gene families expanded in a clade relative to its sister, are the extra
 copies in collinear blocks (WGD-like) or dispersed/tandem (small-scale)?
 
+## 6. Order-free synteny (added)
+
+Collinearity (doubletrouble SD: >= 5 anchors in order) is lost when gene order
+is scrambled within chromosomes, as in Mucorales. Neighbourhood synteny: a
+paralog pair is syntenic if paralog pairs of at least k other gene families
+link the +-W gene neighbourhoods of its two copies, ignoring order (W = 10,
+k = 2; W = 20/30 as checks), calibrated with shuffled gene order. Applied to
+the duplicates of each gene-tree branch, within the same genomes across
+branches of different age, and per duplication across Mucorales genomes.
+
 ## Separate question
 
 Mortierellales retain 435-841 SD pairs per genome, mostly Ks > 2, and the
