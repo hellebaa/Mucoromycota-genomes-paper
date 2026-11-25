@@ -592,16 +592,39 @@ Mortierellales span the branches where Corrochano et al. placed their WGD.
 ```{r ortholog-ks}
 orth_pairs <- data.table(
   a = c("gzAbsCyli1", "AbsRepe", "AbsRepe", "ggRhiOryz1", "ggRhiOryz1", "AbsRepe",
-        "ggMorZona1", "ggRhiOryz1", "ggRhiOryz1"),
+        "ggMorZona1", "ggRhiOryz1", "ggRhiOryz1",
+        "ggMorZona1", "ggMorZona1", "ggMorZona1", "gzMorAlpi1", "ggMorZona1",
+        "gzMucCirc1", "gzMucCirc1", "gzMucCirc1",
+        # splits at ages 70-190, to fill the gap in Ks against split age
+        "gzMucFrag1", "UmbIsab2", "EntParv", "gzMucFrag1", "LicRamo", "gzCunBlak1",
+        "gzMucFrag1", "gzMucFlav2"),
   b = c("AbsRepe", "gzAbsGlau1", "HalRadi", "gzRhiStol1", "gzRhiMicr1", "ggRhiOryz1",
-        "gzPodHuml1", "gzUmbVina1", "ggMorZona1"),
+        "gzPodHuml1", "gzUmbVina1", "ggMorZona1",
+        "gzLinHyal1", "LinElon", "LinSchm", "gzDisGlob2", "gzMorAlpi1",
+        "gzMucHiem1", "BenPoit", "ggRhiOryz1",
+        "MucVelu", "gzUmbIsab1", "EntParv2", "gzMucCirc1", "gzLicCory1", "gzCunEchi1",
+        "gzMucPlum1", "MucPiri"),
   split = c("Within Absidia (A. cylindrospora / A. repens)", "Within Absidia (A. repens / A. glauca)",
             "Absidia / Halteromyces", "Within Rhizopus (R. oryzae / R. stolonifer)",
             "Within Rhizopus (R. oryzae / R. microsporus)", "Absidia / Rhizopus",
-            "Mortierellales crown", "Mucorales / Umbelopsidales", "Mucorales / Mortierellales"))
+            "Mortierellales crown", "Mucorales / Umbelopsidales", "Mucorales / Mortierellales",
+            "Within Mortierellales (M. zonata / L. hyalina)", "Within Mortierellales (M. zonata / L. elongata)",
+            "Within Mortierellales (M. zonata / L. schmuckeri)", "Within Mortierellales (M. alpina / D. globulifera)",
+            "Within Mortierellales (M. zonata / M. alpina)", "Within Mucoraceae (M. circinelloides / M. hiemalis)",
+            "Within Mucoraceae (M. circinelloides / B. poitrasii)", "Mucor / Rhizopus",
+            "Within Mucor (M. fragilis / M. velutinosus)", "Within Umbelopsis (U. isabellina strains)",
+            "Within Mortierellales (E. parvispora strains)", "Within Mucor (M. fragilis / M. circinelloides)",
+            "Within Lichtheimia (L. ramosa / L. corymbifera)", "Within Cunninghamella (C. blakesleeana / C. echinulata)",
+            "Within Mucor (M. fragilis / M. plumbeus)", "Within Mucor (M. flavus / M. piriformis)"))
+# Age of each split on the dated tree (relative time, root = 1,000)
+orth_pairs[, age := round(max(node.depth.edgelength(tree)) -
+                            node.depth.edgelength(tree)[getMRCA(tree, c(a, b))]), by = .(a, b)]
 
 orth_path <- "data/genome_duplication/ortholog_ks.tsv"
-if (!file.exists(orth_path)) {
+# Computed once per species pair and cached; only pairs missing from the cache are computed
+orth_done <- if (file.exists(orth_path)) unique(fread(orth_path)[, paste(a, b)]) else character()
+orth_todo <- orth_pairs[!paste(a, b) %in% orth_done]
+if (nrow(orth_todo) > 0) {
   load_cds <- function(g) {
     f <- sprintf("data/doubletrouble/input_data/%s_data.rds", gen[genome == g, dt_id])
     fetch(f)
@@ -648,21 +671,34 @@ if (!file.exists(orth_path)) {
     data.table(a = a, b = b, one_to_one = nrow(one), gene_a = s$gene_a, gene_b = s$gene_b,
                Ks = ks_of_pairs(cds_a, cds_b, s$gene_a, s$gene_b))
   }
-  orth_ks <- rbindlist(lapply(seq_len(nrow(orth_pairs)), function(i) {
-    ortholog_ks(orth_pairs$a[i], orth_pairs$b[i])
+  orth_new <- rbindlist(lapply(seq_len(nrow(orth_todo)), function(i) {
+    ortholog_ks(orth_todo$a[i], orth_todo$b[i])
   }))
-  fwrite(orth_ks, orth_path, sep = "\t")
+  fwrite(rbind(if (file.exists(orth_path)) fread(orth_path) else NULL, orth_new), orth_path, sep = "\t")
 }
 orth_ks <- fread(orth_path)
 orth_ks <- merge(orth_ks, orth_pairs, by = c("a", "b"))
-orth_sum <- orth_ks[, .(one_to_one = one_to_one[1], sampled = .N,
+orth_sum <- orth_ks[, .(age = age[1], one_to_one = one_to_one[1], sampled = .N,
                         Ks_q25 = quantile(Ks, 0.25, na.rm = TRUE), Ks_median = median(Ks, na.rm = TRUE),
                         Ks_q75 = quantile(Ks, 0.75, na.rm = TRUE),
                         saturated_pct = 100 * mean(Ks > 2, na.rm = TRUE)), by = .(split, a, b)]
+# Peak of each ortholog distribution, fitted as for the paralogs (largest
+# Gaussian component below Ks 3): near saturation the median is pulled up by
+# saturated orthologs, so the peak is the value to compare with paralog peaks
+orth_peak <- orth_ks[!is.na(Ks) & Ks >= 0.05 & Ks <= 5, {
+  pk <- fit_peaks(Ks)[, Ks := exp(mean_log)][Ks < 3][order(-weight)]
+  # reported only if this component holds at least half of the orthologs;
+  # otherwise the distribution is mostly saturated and the peak is not a speciation
+  if (nrow(pk) > 0 && pk$weight[1] >= 0.5) .(Ks_peak = pk$Ks[1], peak_weight = pk$weight[1])
+  else .(Ks_peak = NA_real_, peak_weight = if (nrow(pk) > 0) pk$weight[1] else 0)
+}, by = split]
+orth_sum <- merge(orth_sum, orth_peak, by = "split")
 orth_sum <- orth_sum[match(orth_pairs$split, split)]
-num <- c("Ks_q25", "Ks_median", "Ks_q75", "saturated_pct")
+orth_sum[, peak_weight := NULL]
+setcolorder(orth_sum, c("split", "a", "b", "age", "one_to_one", "sampled", "Ks_peak"))
+num <- c("Ks_q25", "Ks_median", "Ks_q75", "saturated_pct", "Ks_peak")
 orth_sum[, (num) := lapply(.SD, round, 2), .SDcols = num]
-knitr::kable(orth_sum, caption = tcap("orthks", "Ks between one-to-one orthologs of species pairs (400 random orthologs per pair; MYN model, as for the paralogs). one_to_one: number of one-to-one orthologs available. saturated_pct: percentage of orthologs with Ks > 2."))
+local({ op <- options(knitr.kable.NA = ""); on.exit(options(op)); knitr::kable(orth_sum, caption = tcap("orthks", paste0("Ks between one-to-one orthologs of species pairs (400 random orthologs per pair; MYN model, as for the paralogs). age: age of the split on the dated tree (relative time, root = 1,000). Ks_peak: largest Gaussian mixture component below Ks 3, fitted as for the paralogs (", tab("peaks"), "), given only where it holds at least half of the orthologs; empty where the distribution is mostly saturated. one_to_one: number of one-to-one orthologs available. saturated_pct: percentage of orthologs with Ks > 2.")))})
 ```
 
 ```{r ks-peaks-fig, fig.width = 10, fig.height = 7, fig.cap = cap("ks_peaks", "Ks distributions of segmental pairs (Ks 0.05-5, log scale) in the genomes with the most segmental pairs: Absidia and Rhizopus (Mucorales) and two Mortierellales for comparison. Grey: histogram; black curve: fitted Gaussian mixture; coloured vertical lines: median ortholog Ks to the species named (Table 7). Dotted line: Ks = 2.")}
@@ -696,7 +732,7 @@ ggplot(hist_d, aes(log(Ks))) +
   theme(legend.position = "bottom", strip.text = element_text(size = 8))
 ```
 
-```{r orth-ks-fig, fig.width = 8, fig.height = 5, fig.cap = cap("orth_ks", "Ks between one-to-one orthologs for each species pair (log scale; 400 orthologs per pair). Boxes: median and quartiles. Dotted line: Ks = 2. Red points: main segmental Ks peak (Table 6) of each Absidia and Rhizopus genome in the comparison.")}
+```{r orth-ks-fig, fig.width = 8, fig.height = 7, fig.cap = cap("orth_ks", "Ks between one-to-one orthologs for each species pair (log scale; 400 orthologs per pair). Boxes: median and quartiles. Dotted line: Ks = 2. Red points: main segmental Ks peak (Table 6) of each Absidia and Rhizopus genome in the comparison.")}
 orth_ks[, split_f := factor(split, rev(orth_pairs$split))]
 pk_pts <- rbind(main_peak[, .(genome, Ks)][orth_pairs, on = c(genome = "a"), nomatch = NULL][, .(split, genome, Ks)],
                 main_peak[, .(genome, Ks)][orth_pairs, on = c(genome = "b"), nomatch = NULL][, .(split, genome, Ks)])
@@ -717,6 +753,7 @@ ggplot(orth_ks[Ks >= 0.01], aes(Ks, split_f)) +
 ```{r conclusion-3-values}
 mp <- function(g) main_peak[genome == g]
 om <- function(s) orth_sum[split == s, Ks_median]
+op <- function(s) sprintf("%.2f", orth_sum[split == s, Ks_peak])
 mort_main <- main_peak[genome %in% gen[order == "Mortierellales", genome]]
 mort_sat <- ksd[class == "Segmental (SD)" & order == "Mortierellales", mean(Ks > 2)]
 abs_rhi <- c("gzAbsCyli1", "AbsRepe", "gzAbsGlau1", "ggRhiOryz1")
@@ -739,20 +776,21 @@ lic <- mp("LicRamo"); lic_n <- sd_n[genome == "LicRamo", N]
   *A. repens*** (ortholog Ks `r om("Within Absidia (A. cylindrospora / A. repens)")`
   against peaks at `r round(mp("gzAbsCyli1")$Ks, 2)` and
   `r round(mp("AbsRepe")$Ks, 2)`), so it is shared by these two species.
-  Whether it is shared with *A. glauca* is unclear: their ortholog Ks
-  (`r om("Within Absidia (A. repens / A. glauca)")`) is close to the peak and
+  Whether it is shared with *A. glauca* is unclear: the peak of their ortholog
+  Ks (`r op("Within Absidia (A. repens / A. glauca)")`; median
+  `r om("Within Absidia (A. repens / A. glauca)")`) is close to the paralog peak and
   near saturation, and *A. glauca* has far fewer segmental pairs. The gene
   trees show that it is shared, with part of the rediploidization completed
   after the split (Section 4.5).
 - **The *R. oryzae* event is probably younger than its split from
-  *R. microsporus*** (ortholog Ks `r om("Within Rhizopus (R. oryzae / R. microsporus)")`
-  against a peak at `r round(mp("ggRhiOryz1")$Ks, 2)`; both near saturation,
-  so this is tentative), consistent with the almost
+  *R. microsporus*** (ortholog Ks peak `r op("Within Rhizopus (R. oryzae / R. microsporus)")`
+  against a paralog peak at `r round(mp("ggRhiOryz1")$Ks, 2)`; both near saturation,
+  so Ks alone is tentative here), consistent with the almost
   complete lack of segmental pairs in *R. microsporus*. It probably
   corresponds to the WGD reported for *R. delemar* (= *R. oryzae* lineage;
   Ma et al. 2009). Whether *R. stolonifer* shares it cannot be decided with Ks
-  (ortholog Ks `r om("Within Rhizopus (R. oryzae / R. stolonifer)")`, close to
-  both peaks); the gene trees in Section 4 show that it does.
+  (ortholog Ks peak `r op("Within Rhizopus (R. oryzae / R. stolonifer)")`, close to
+  both paralog peaks); the gene trees in Section 4 show that it does.
 - **Mortierellales segmental duplicates are mostly saturated.**
   `r pct(mort_sat)`% of their segmental pairs have Ks > 2, and most fall in
   components at Ks `r paste(sprintf("%.1f", range(mort_high$Ks)), collapse = "-")`. All `r uniqueN(mort_mid$genome)` Mortierellales
