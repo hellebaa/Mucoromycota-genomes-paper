@@ -10,6 +10,7 @@ analysis/          One subdirectory per analysis
     download_data.sh   Download input files from storage
 scripts/
   download_files.sh  Shared file downloader (currently NeLS, later Zenodo)
+  nels.R             R helpers for reading NeLS files interactively
 data/              Downloaded data files — not tracked by git
 ```
 
@@ -25,6 +26,22 @@ files it needs:
 ```bash
 bash analysis/synteny/download_data.sh
 ```
+
+### Reading NeLS files from R
+
+For interactive exploration, [`scripts/nels.R`](scripts/nels.R) reads files
+from NeLS directly over SSH, using the same `nels.storage` host. Paths are the
+same as in the repo:
+
+```r
+source("scripts/nels.R")
+nels_ls("data")                                  # list a folder
+sp <- nels_read("data/species.tsv")              # stream a table (data.table::fread)
+f  <- nels_file("data/phylogeny/sco_cds_b500.date.nwk")  # download once to data/, local path
+```
+
+Pipelines should still fetch their inputs with `download_data.sh`, so that
+they keep working when the data moves to Zenodo.
 
 ## Adding a new analysis
 
