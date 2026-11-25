@@ -57,16 +57,27 @@ cap  <- function(id, text) paste0("**", fig(id), ".** ", text)
 tcap <- function(id, text) paste0(tab(id), ". ", text)
 
 order_levels <- c("Mortierellales", "Umbelopsidales", "Mucorales")
-order_cols <- c(Mortierellales = "#E69F00", Umbelopsidales = "#009E73", Mucorales = "#0072B2")
+# Orders: blue Mortierellales, yellow Umbelopsidales, red Mucorales
+order_cols <- c(Mortierellales = "#2E6DB4", Umbelopsidales = "#E0A800", Mucorales = "#B8312F")
+# Accent for block (segmental / ancestral-SD) duplications and duplication events:
+# purple, so that it is not read as one of the order colours
+accent <- "#7B3294"; accent_light <- "#C2A5CF"
 mode_levels <- c("SD", "TD", "PD", "DD", "Near-identical")
 mode_labs <- c(SD = "Segmental (SD)", TD = "Tandem (TD)", PD = "Proximal (PD)",
                DD = "Dispersed (DD)", "Near-identical" = "Near-identical (Ks < 0.05 or missing)")
-mode_cols <- c(SD = "#D55E00", TD = "#CC79A7", PD = "#56B4E9", DD = "grey70",
+mode_cols <- c(SD = accent, TD = "#1B9E77", PD = "#A6761D", DD = "grey70",
                "Near-identical" = "grey20")
 theme_set(theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank()))
 
 pct <- function(x, digits = 0) format(round(100 * x, digits), nsmall = digits)
 fmt_n <- function(x) format(x, big.mark = ",", trim = TRUE)
+```
+
+```{css font-size, echo = FALSE}
+/* Body text 1.25 times the default html_document (Bootstrap 3) size; headings at their defaults */
+body { font-size: 17.5px; }
+pre, code { font-size: 16px; }
+.tocify { font-size: 16px; }
 ```
 
 # Background {-}
@@ -740,8 +751,8 @@ pk_pts <- pk_pts[grepl("^(gzAbs|AbsRepe|ggRhi|gzRhi)", genome)]
 pk_pts[, split_f := factor(split, levels(orth_ks$split_f))]
 ggplot(orth_ks[Ks >= 0.01], aes(Ks, split_f)) +
   geom_boxplot(outlier.size = 0.5, fill = "grey90") +
-  geom_point(data = pk_pts, colour = "#D55E00", size = 2.5) +
-  geom_text_repel(data = pk_pts, aes(label = genome), colour = "#D55E00", size = 2.8,
+  geom_point(data = pk_pts, colour = accent, size = 2.5) +
+  geom_text_repel(data = pk_pts, aes(label = genome), colour = accent, size = 2.8,
                   direction = "y", nudge_y = 0.3, min.segment.length = 0) +
   geom_vline(xintercept = 2, linetype = "dotted") +
   scale_x_log10(breaks = c(0.05, 0.1, 0.2, 0.5, 1, 2, 5)) +
@@ -1663,7 +1674,7 @@ ggplot(sl, aes(pct, lab)) +
   geom_line(aes(group = lab), colour = "grey80") +
   geom_point(aes(colour = dups), size = 2.5) +
   scale_x_sqrt(breaks = c(0.5, 2, 5, 10, 25, 50)) +
-  scale_colour_manual(values = c("grey50", "#0072B2", "#E69F00"), name = NULL) +
+  scale_colour_manual(values = c("grey60", order_cols[["Mucorales"]], "grey10"), name = NULL) +
   labs(x = "Neighbourhood-syntenic pairs (%)", y = NULL) +
   theme(legend.position = "bottom")
 ```
@@ -1677,7 +1688,7 @@ evh <- ev12[n_genomes > 0, .N, by = .(bin, real = run == "real")][, N := ifelse(
 evh[, set := factor(ifelse(real, "Real genomes", "Shuffled gene order"), c("Real genomes", "Shuffled gene order"))]
 p_ev <- ggplot(evh, aes(bin, N, fill = set)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.75) +
-  scale_fill_manual(values = c("#0072B2", "grey70"), name = NULL) +
+  scale_fill_manual(values = c(order_cols[["Mucorales"]], "grey70"), name = NULL) +
   labs(x = "Genomes in which the duplication is syntenic", y = "N12 duplications") +
   theme(legend.position = "bottom")
 g12 <- real10[node == "N12", .(pct = 100 * mean(pass), n = .N), by = genome]
@@ -1758,7 +1769,7 @@ ggplot(ksw, aes(Ks, colour = set)) +
   geom_vline(xintercept = 2, linetype = "dotted") +
   facet_wrap(~panel, ncol = 4, scales = "free_y") +
   scale_x_log10(breaks = c(0.05, 0.2, 0.5, 1, 2, 5), labels = c(0.05, 0.2, 0.5, 1, 2, 5)) +
-  scale_colour_manual(values = c(ancientSD = "#D55E00", other = "grey55"), name = NULL) +
+  scale_colour_manual(values = c(ancientSD = accent, other = "grey55"), name = NULL) +
   labs(x = "Ks", y = "Density") +
   theme(legend.position = "bottom", strip.text = element_text(size = 8))
 ```

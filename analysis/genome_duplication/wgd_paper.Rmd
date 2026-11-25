@@ -54,16 +54,27 @@ cap  <- function(id, text) paste0("**", fig(id), ".** ", text)
 tcap <- function(id, text) paste0(tab(id), ". ", text)
 
 order_levels <- c("Mortierellales", "Umbelopsidales", "Mucorales")
-order_cols <- c(Mortierellales = "#E69F00", Umbelopsidales = "#009E73", Mucorales = "#0072B2")
+# Orders: blue Mortierellales, yellow Umbelopsidales, red Mucorales
+order_cols <- c(Mortierellales = "#2E6DB4", Umbelopsidales = "#E0A800", Mucorales = "#B8312F")
+# Accent for block (segmental / ancestral-SD) duplications and duplication events:
+# purple, so that it is not read as one of the order colours
+accent <- "#7B3294"; accent_light <- "#C2A5CF"
 mode_levels <- c("SD", "TD", "PD", "DD", "Near-identical")
 mode_labs <- c(SD = "Segmental (SD)", TD = "Tandem (TD)", PD = "Proximal (PD)",
                DD = "Dispersed (DD)", "Near-identical" = "Near-identical (Ks < 0.05 or missing)")
-mode_cols <- c(SD = "#D55E00", TD = "#CC79A7", PD = "#56B4E9", DD = "grey70",
+mode_cols <- c(SD = accent, TD = "#1B9E77", PD = "#A6761D", DD = "grey70",
                "Near-identical" = "grey20")
 theme_set(theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank()))
 
 pct <- function(x, digits = 0) format(round(100 * x, digits), nsmall = digits)
 fmt_n <- function(x) format(x, big.mark = ",", trim = TRUE)
+```
+
+```{css font-size, echo = FALSE}
+/* Body text 1.25 times the default html_document (Bootstrap 3) size; headings at their defaults */
+body { font-size: 17.5px; }
+pre, code { font-size: 16px; }
+.tocify { font-size: 16px; }
 ```
 
 # Overview {-}
@@ -295,7 +306,26 @@ sd_ni_share <- pairs[type == "SD"][gen[, .(genome, order)], on = "genome", nomat
   , .(share = mean(near_ident)), by = .(genome, order)][, .(median_share = median(share)), by = order]
 ```
 
-Among the `r nrow(hi_cont)` well-assembled genomes (at least 75% of genes on
+```{r sd-totals}
+# Segmental (SD) pairs and the genes in them, per order and in total (Table S1)
+sd_genes <- function(d) uniqueN(c(paste(d$genome, d$dup1), paste(d$genome, d$dup2)))
+sd_count <- function(d, genomes) data.table(
+  genomes = length(genomes), with_sd = uniqueN(d$genome),
+  sd_pairs = nrow(d), sd_genes = sd_genes(d),
+  sd_pairs_old = sum(!d$near_ident), sd_genes_old = sd_genes(d[near_ident == FALSE]))
+sd_all <- pairs[type == "SD"][, order := gen$order[match(genome, gen$genome)]]
+sd_s1 <- rbind(
+  rbindlist(lapply(order_levels, function(o)
+    cbind(order = o, sd_count(sd_all[order == o], gen[order == o, genome])))),
+  cbind(order = "Total", sd_count(sd_all, gen$genome)))
+sd_tot <- sd_s1[order == "Total"]
+```
+
+In total, doubletrouble found `r fmt_n(sd_tot$sd_pairs)` segmental pairs
+(`r fmt_n(sd_tot$sd_genes)` genes) in `r sd_tot$with_sd` of the
+`r sd_tot$genomes` genomes, `r fmt_n(sd_tot$sd_pairs_old)` pairs
+(`r fmt_n(sd_tot$sd_genes_old)` genes) after excluding near-identical pairs
+(Table S1). Among the `r nrow(hi_cont)` well-assembled genomes (at least 75% of genes on
 sequences of 1 Mb or more), segmental duplicates are common in Mortierellales
 (median `r round(sd_by_order_hi[order == "Mortierellales", median_sd_per_1k], 1)`
 pairs per 1,000 genes) and in *Absidia* and *Rhizopus*, and rare in the other
@@ -686,7 +716,7 @@ ggplot(bk, aes(N, lab, fill = cls)) +
   geom_col(width = 0.75) +
   geom_text(data = bk_tot, aes(x = total, y = lab, label = sprintf("%s (%.0f%%)", fmt_n(anc), 100 * anc / total)),
             inherit.aes = FALSE, hjust = -0.1, size = 3) +
-  scale_fill_manual(values = c("Ancestral-SD" = "#D55E00", "Syntenic in 1 genome" = "#F0B27A", "No synteny" = "grey80"),
+  scale_fill_manual(values = c("Ancestral-SD" = accent, "Syntenic in 1 genome" = accent_light, "No synteny" = "grey80"),
                     breaks = c("Ancestral-SD", "Syntenic in 1 genome", "No synteny"), name = NULL) +
   scale_x_continuous(expand = expansion(mult = c(0, 0.18))) +
   labs(x = "Gene-tree duplications (at least 50% support)", y = NULL) +
@@ -723,7 +753,7 @@ evh <- ev12[n_genomes > 0, .N, by = .(bin, real = run == "real")][, N := ifelse(
 evh[, set := factor(ifelse(real, "Real genomes", "Shuffled gene order"), c("Real genomes", "Shuffled gene order"))]
 p_ev <- ggplot(evh, aes(bin, N, fill = set)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.75) +
-  scale_fill_manual(values = c("#0072B2", "grey70"), name = NULL) +
+  scale_fill_manual(values = c(order_cols[["Mucorales"]], "grey70"), name = NULL) +
   labs(x = "Genomes in which the duplication is syntenic", y = "N12 duplications") +
   theme(legend.position = "bottom")
 g12 <- real10[node == "N12", .(pct = 100 * mean(pass), n = .N), by = genome]
@@ -811,11 +841,11 @@ cartoon <- function(nwk, dup_tips = NULL, title, pred, events = NULL) {
           plot.margin = margin(4, 8, 4, 4))
   if (!is.null(dup_tips)) {
     dn <- getMRCA(tr, gsub("_", " ", dup_tips))
-    p <- p + geom_point(data = d[d$node == dn, ], aes(x, y), shape = 22, size = 4.5, fill = "#D55E00", colour = "white")
+    p <- p + geom_point(data = d[d$node == dn, ], aes(x, y), shape = 22, size = 4.5, fill = accent, colour = "white")
   }
   if (!is.null(events)) {
     ev_d <- merge(d, events, by = "label")
-    p <- p + geom_point(data = ev_d, aes(branch, y), shape = 21, size = 6.5, fill = "#D55E00", colour = "#D55E00") +
+    p <- p + geom_point(data = ev_d, aes(branch, y), shape = 21, size = 6.5, fill = accent, colour = accent) +
       geom_text(data = ev_d, aes(branch, y, label = id), colour = "white", fontface = "bold", size = 3.3)
   }
   p
@@ -825,9 +855,9 @@ p_sp <- cartoon(sp_tr, title = "A. Species tree", pred = "Candidate branches:\n1
 sp_d <- p_sp$data
 umbmuc <- sp_d[sp_d$node == getMRCA(read.tree(text = sp_tr), c("Umbelopsidales", "Mucorales")), ]
 p_sp <- p_sp +
-  geom_point(data = umbmuc, aes(branch, y), shape = 21, size = 6.5, fill = "white", colour = "#D55E00", stroke = 1) +
-  geom_text(data = umbmuc, aes(branch, y), label = "5", colour = "#D55E00", fontface = "bold", size = 3.3) +
-  geom_point(data = sp_d[sp_d$label %in% "Mucorales", ], aes(branch, y), shape = 21, size = 6.5, fill = "#D55E00", colour = "#D55E00") +
+  geom_point(data = umbmuc, aes(branch, y), shape = 21, size = 6.5, fill = "white", colour = accent, stroke = 1) +
+  geom_text(data = umbmuc, aes(branch, y), label = "5", colour = accent, fontface = "bold", size = 3.3) +
+  geom_point(data = sp_d[sp_d$label %in% "Mucorales", ], aes(branch, y), shape = 21, size = 6.5, fill = accent, colour = accent) +
   geom_text(data = sp_d[sp_d$label %in% "Mucorales", ], aes(branch, y), label = "1", colour = "white", fontface = "bold", size = 3.3)
 p_e1 <- cartoon("(Mortierellales,(Umbelopsidales,(Mucorales_A,Mucorales_B)));", c("Mucorales_A", "Mucorales_B"),
                 "B. Duplication on the\nMucorales stem (1)", "Prediction: Umbelopsidales\noutside both copy groups\n")
@@ -843,7 +873,7 @@ obs <- rbind(
   data.table(group = "5-like", events = e5s("one", "events"), anc = e5s("one", "anc")))
 obs[, `:=`(pct = 100 * anc / events, group = factor(group, rev(group)))]
 p_obs <- ggplot(obs, aes(pct, group)) +
-  geom_col(fill = "#D55E00", width = 0.6) +
+  geom_col(fill = accent, width = 0.6) +
   geom_text(aes(label = sprintf("%s of %s duplications (%.0f%%)", fmt_n(anc), fmt_n(events), pct)),
             hjust = -0.05, size = 3.3) +
   scale_x_continuous(limits = c(0, 62), expand = c(0, 0)) +
@@ -1093,7 +1123,7 @@ p_ridge <- ggplot() +
   annotate("text", x = 2.5, y = ytop - 0.15, label = "saturating", size = 3, colour = "grey40") +
   geom_hline(data = rd, aes(yintercept = y), colour = "grey75", linewidth = 0.3) +
   geom_ribbon(data = rid, aes(x = ks, ymin = y, ymax = ymax, group = genome),
-              fill = "#D55E00", alpha = 0.5, colour = "#D55E00", linewidth = 0.3) +
+              fill = accent, alpha = 0.5, colour = accent, linewidth = 0.3) +
   geom_text(data = blk_n[n < min_pairs], aes(x = 1.5, y = y + 0.22,
             label = "too few block duplicates for a ridge"),
             size = 2.7, colour = "grey45", fontface = "italic") +
@@ -1131,7 +1161,7 @@ ggplot(ksw, aes(Ks, colour = set)) +
   geom_vline(xintercept = 2, linetype = "dotted") +
   facet_wrap(~panel, ncol = 4, scales = "free_y") +
   scale_x_log10(breaks = c(0.05, 0.2, 0.5, 1, 2, 5), labels = c(0.05, 0.2, 0.5, 1, 2, 5)) +
-  scale_colour_manual(values = c(ancientSD = "#D55E00", other = "grey55"), name = NULL,
+  scale_colour_manual(values = c(ancientSD = accent, other = "grey55"), name = NULL,
                       labels = c(ancientSD = "Ancestral-SD", other = "Other duplications")) +
   labs(x = "Ks", y = "Density") +
   theme(legend.position = "bottom", strip.text = element_text(size = 8))
@@ -1242,7 +1272,7 @@ ev[, `:=`(x = d0$branch[match(node, d0$node)], y = d0$y[match(node, d0$node)])]
 # Event 2: Ks tentatively places it late on the Mortierellales stem
 mort_crown_x <- d0$x[match(mrca(gen[order == "Mortierellales", genome]), d0$node)]
 ev[id == "2", x := mort_crown_x - 60]
-ev_col <- "#D55E00"
+ev_col <- accent
 datable_age <- 300   # roughly the age up to which Ks ranks events (see Section 5)
 p_tree <- p_base +
   annotate("segment", x = mort_crown_x - 120, xend = mort_crown_x, y = ev[id == "2", y], yend = ev[id == "2", y],
@@ -1257,10 +1287,10 @@ p_tree <- p_base +
         axis.text.x = element_text(size = 9), axis.title.x = element_text(size = 9.5, hjust = 0.3))
 # Shaded window where Ks can still rank events, drawn beneath the tree
 datable <- annotate("rect", xmin = 1000 - datable_age, xmax = 1000, ymin = -Inf, ymax = Inf,
-                    fill = "#D55E00", alpha = 0.07)
+                    fill = accent, alpha = 0.07)
 p_tree$layers <- c(datable, p_tree$layers)
 p_tree <- p_tree + annotate("text", x = 1000 - datable_age / 2, y = max(d0$y) + 0.9,
-                            label = "Ks-datable", size = 3, colour = "#B04A00")
+                            label = "Ks-datable", size = 3, colour = accent)
 # Evidence per event
 abs_ks <- main_peak[genome %in% c("gzAbsCyli1", "AbsRepe", "gzAbsGlau1"), median(Ks)]
 rhi_ks <- main_peak[genome == "ggRhiOryz1", Ks]
@@ -1320,6 +1350,21 @@ p_tree + p_txt + plot_layout(widths = c(1.35, 1))
 - **WGD or several segmental duplications.** These analyses show block
   duplications on each branch but cannot tell a single WGD from several large
   segmental duplications. A model-based test (Whale) is planned.
+
+# Supplementary tables {-}
+
+```{r table-s1}
+s1 <- sd_s1[, .(order, genomes, `genomes with SD pairs` = with_sd,
+                `SD pairs` = fmt_n(sd_pairs), `genes in SD pairs` = fmt_n(sd_genes),
+                `SD pairs, Ks >= 0.05` = fmt_n(sd_pairs_old), `genes, Ks >= 0.05` = fmt_n(sd_genes_old),
+                `near-identical (%)` = sprintf("%.0f", 100 * (1 - sd_pairs_old / sd_pairs)))]
+knitr::kable(s1, align = c("l", rep("r", 7)),
+  caption = paste("Table S1. Segmental duplicates identified by doubletrouble, per order and in total.",
+                  "SD pairs: anchor pairs of collinear blocks (MCScanX algorithm, at least 5 anchors); each pair is",
+                  "one anchor of a block, so blocks are far fewer. Genes: distinct genes in these pairs. Ks >= 0.05:",
+                  "excluding near-identical pairs (Ks < 0.05 or no estimable Ks), mostly assembly duplicates or very",
+                  "recent copies. near-identical (%): share of SD pairs that are near-identical."))
+```
 
 # Session info {-}
 
