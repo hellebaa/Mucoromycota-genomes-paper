@@ -1,0 +1,1589 @@
+---
+title: "Segmental and whole-genome duplications in Mucoromycota"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    self_contained: true
+    code_folding: hide
+    df_print: kable
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center", dpi = 150)
+
+# Run all chunks from the repo root, so paths match the repo layout
+# (data/..., analysis/...) whether knitted from RStudio or from a script.
+repo <- system("git rev-parse --show-toplevel", intern = TRUE)
+knitr::opts_knit$set(root.dir = repo)
+
+suppressPackageStartupMessages({
+  library(data.table)
+  library(ape)
+  library(nlme)
+  library(ggplot2)
+  library(ggtree)
+  library(aplot)
+  library(ggrepel)
+  library(mclust)
+  library(patchwork)
+})
+requireNamespace("Biostrings", quietly = TRUE)  # protein sequences in doubletrouble input files
+source(file.path(repo, "scripts/nels.R"))  # nels_ls(), nels_read(), nels_file()
+
+# Fetch input files that are not yet in data/, in one call to the shared
+# downloader (scripts/download_files.sh, see CLAUDE.md).
+fetch <- function(paths) {
+  missing <- paths[!file.exists(file.path(repo, paths))]
+  if (length(missing) > 0) {
+    status <- system2(file.path(repo, "scripts/download_files.sh"), shQuote(missing))
+    if (status != 0) stop("Download failed for: ", paste(missing, collapse = ", "))
+  }
+  invisible(paths)
+}
+
+# Figure and table numbers, in order of appearance
+fig_ids <- c("landscape", "genes_dups", "sd_contig", "ref_tree", "nb_scheme", "anc_branches", "nb_events",
+             "gt_test", "ks_ridges", "anc_ks", "summary")
+tab_ids <- c("orders", "nb_calib", "anc_counts", "peaks", "orthks", "anc")
+fig  <- function(id) paste("Figure", match(id, fig_ids))
+tab  <- function(id) paste("Table", match(id, tab_ids))
+cap  <- function(id, text) paste0("**", fig(id), ".** ", text)
+tcap <- function(id, text) paste0(tab(id), ". ", text)
+
+order_levels <- c("Mortierellales", "Umbelopsidales", "Mucorales")
+# Orders: blue Mortierellales, yellow Umbelopsidales, red Mucorales
+order_cols <- c(Mortierellales = "#2E6DB4", Umbelopsidales = "#E0A800", Mucorales = "#B8312F")
+# Accent for block (segmental / ancestral-SD) duplications and duplication events:
+# purple, so that it is not read as one of the order colours
+accent <- "#7B3294"; accent_light <- "#C2A5CF"
+mode_levels <- c("SD", "TD", "PD", "DD", "Near-identical")
+mode_labs <- c(SD = "Segmental (SD)", TD = "Tandem (TD)", PD = "Proximal (PD)",
+               DD = "Dispersed (DD)", "Near-identical" = "Near-identical (Ks < 0.05 or missing)")
+mode_cols <- c(SD = accent, TD = "#1B9E77", PD = "#A6761D", DD = "grey70",
+               "Near-identical" = "grey20")
+theme_set(theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank()))
+
+pct <- function(x, digits = 0) format(round(100 * x, digits), nsmall = digits)
+fmt_n <- function(x) format(x, big.mark = ",", trim = TRUE)
+```
+
+```{css font-size, echo = FALSE}
+/* Body text 1.25 times the default html_document (Bootstrap 3) size; headings at their defaults */
+body { font-size: 17.5px; }
+pre, code { font-size: 16px; }
+.tocify { font-size: 16px; }
+```
+
+# Overview {-}
+
+Duplicated genes were classified in 61 genomes of Mortierellales,
+Umbelopsidales and Mucorales, compared across genomes, and traced back to the
+branches of the species tree where they arose. Because gene order is scrambled
+in many of these genomes, duplications that arose in blocks were identified
+with a measure of synteny that does not depend on gene order, and their Ks
+distributions were used to date the large-scale duplication events. The
+extended analyses behind this report (assembly QC, gene-tree duplication rates,
+macrosynteny, copy-number tests, robustness checks) are in
+[`wgd_mucoromycota.Rmd`](wgd_mucoromycota.Rmd).
+
+```{r data}
+fetch(c("data/metadata/genome_metadata_master.csv",
+        "data/metadata/assembly_qc_summary.csv",
+        "data/phylogeny/sco_cds_b500.date.nwk",
+        "data/orthofinder/results/Comparative_Genomics_Statistics/Statistics_PerSpecies.tsv"))
+
+md <- fread("data/metadata/genome_metadata_master.csv")
+gen <- md[include_core_analyses == "yes",
+          .(genome = tree_label, dt_id = genome_id, species = species_name, family,
+            order = factor(order, order_levels))]
+tree <- read.tree("data/phylogeny/sco_cds_b500.date.nwk")
+stopifnot(setequal(gen$genome, tree$tip.label), !anyNA(gen$order))
+
+# Number of protein-coding genes (OrthoFinder input proteomes)
+ps <- fread("data/orthofinder/results/Comparative_Genomics_Statistics/Statistics_PerSpecies.tsv",
+            header = TRUE, nrows = 10)
+setnames(ps, 1, "stat")
+ng <- unlist(ps[stat == "Number of genes", -1])
+# OrthoFinder species names (e.g. AbsRepe_prot, gzAbsCyli1.proteins) by genome
+of_names <- setNames(names(ng), sub("[._](prot|proteins|pep)$", "", names(ng)))
+names(ng) <- names(of_names)
+gen[, genes := as.numeric(ng[genome])]
+stopifnot(!anyNA(gen$genes))
+
+qc <- fread("data/metadata/assembly_qc_summary.csv")
+gen[, busco_dup := qc$Busco_Dup[match(genome, qc$genome_id)]]
+
+# Genomes in tree order (bottom to top), for plots
+tip_data <- ggtree(tree)$data
+tip_order <- with(tip_data[tip_data$isTip, ], label[order(y)])
+```
+
+```{r contig-lengths}
+# Sequence lengths of every assembly. Computed once on NeLS (awk over each
+# assembly FASTA, so the ~3 GB of assemblies are not downloaded) and saved to
+# data/. This is the one NeLS-specific step; at publication the table is
+# deposited with the other data files.
+cl_path <- "data/genome_duplication/contig_lengths.tsv"
+if (!file.exists(cl_path)) {
+  remote <- paste(
+    "cd", shQuote(nels_path("data/genomes")), "&& printf 'genome\\tseqname\\tlength\\n' &&",
+    "for g in *; do",
+    "f=$(ls \"$g\" | grep -E '\\.(fna|fasta|fa|fas)(\\.gz)?$' | grep -viE 'cds|transcript|protein|rna_from');",
+    "[ $(echo $f | wc -w) -eq 1 ] || { echo \"No unique assembly in $g\" >&2; exit 1; };",
+    "case \"$f\" in *.gz) r='gzip -dc';; *) r=cat;; esac;",
+    "$r \"$g/$f\" | awk -v g=\"$g\" '/^>/ {if (n != \"\") print g \"\\t\" n \"\\t\" l; n = substr($1, 2); l = 0; next}",
+    "{l += length($0)} END {if (n != \"\") print g \"\\t\" n \"\\t\" l}';",
+    "done")
+  dir.create(dirname(cl_path), recursive = TRUE, showWarnings = FALSE)
+  writeLines(.nels_run(remote), cl_path)
+}
+cl <- fread(cl_path, colClasses = c(seqname = "character"))
+stopifnot(all(gen$genome %in% cl$genome))
+```
+
+```{r gene-positions}
+fetch(sprintf("data/genomes/%1$s/%1$s_genePosTbl.tsv", gen$genome))
+gp <- rbindlist(lapply(gen$genome, function(g) {
+  fread(sprintf("data/genomes/%1$s/%1$s_genePosTbl.tsv", g),
+        colClasses = c(seqname = "character"))[, genome := g]
+}))
+gp <- merge(gp, cl, by = c("genome", "seqname"), all.x = TRUE)
+stopifnot(mean(!is.na(gp$length)) > 0.99)  # gene tables and assemblies use the same names
+```
+
+```{r doubletrouble}
+dup_files  <- sprintf("data/doubletrouble/dups/%s_dup.rds", gen$dt_id)
+kaks_files <- sprintf("data/doubletrouble/kaks/%s_kaks.rds", gen$dt_id)
+fetch(c(dup_files, kaks_files))
+
+pairs <- rbindlist(lapply(seq_len(nrow(gen)), function(i) {
+  d <- as.data.table(readRDS(dup_files[i]))
+  k <- as.data.table(readRDS(kaks_files[i])[[1]])
+  d <- merge(d, k[, .(dup1, dup2, Ka, Ks)], by = c("dup1", "dup2"), all.x = TRUE)
+  d[, .(genome = gen$genome[i], dup1, dup2, type = as.character(type),
+        seq1 = as.character(seqname1), seq2 = as.character(seqname2), Ka, Ks)]
+}))
+# Near-identical pairs: Ks < 0.05, or Ks not estimable (mostly identical
+# sequences, see Section 1.2). These are recent duplicates or assembly
+# duplicates and are kept apart from the older pairs.
+pairs[, near_ident := is.na(Ks) | Ks < 0.05]
+```
+
+```{r contiguity-calc}
+n50 <- function(x) { x <- sort(x, decreasing = TRUE); x[which(cumsum(x) >= sum(x) / 2)[1]] }
+asm <- cl[, .(n_seq = .N, size_mb = sum(length) / 1e6, n50_mb = n50(length) / 1e6), by = genome]
+gcont <- gp[, .(gene_seqs = uniqueN(seqname), on_1mb = mean(length >= 1e6, na.rm = TRUE)),
+            by = genome]
+gen <- merge(gen, asm, by = "genome", all.x = TRUE)
+gen <- merge(gen, gcont, by = "genome", all.x = TRUE)
+```
+
+```{r nearident-calc}
+ni <- pairs[near_ident == TRUE]
+ni_sd <- ni[type == "SD", .(ni_sd = .N, ni_sd_seq_pairs = uniqueN(paste(pmin(seq1, seq2), pmax(seq1, seq2)))),
+            by = genome]
+gen <- merge(gen, ni_sd, by = "genome", all.x = TRUE)
+gen[is.na(ni_sd), `:=`(ni_sd = 0L, ni_sd_seq_pairs = 0L)]
+gen <- merge(gen, pairs[, .(pairs = .N, ni_all = sum(near_ident),
+                            sd_old = sum(type == "SD" & !near_ident)), by = genome],
+             by = "genome")
+```
+
+# Classifying duplicated genes
+
+Duplicate gene pairs were identified and classified within each genome with
+doubletrouble 1.8.1 (standard scheme, default parameters):
+
+- **Paralogous pairs:** each proteome against itself with DIAMOND (top 5 hits
+  per protein, E-value <= 1e-10).
+- **SD, segmental:** anchor pairs of collinear blocks within the genome
+  (MCScanX algorithm in syntenet; at least 5 anchors, up to 25 genes apart).
+- **TD, tandem:** remaining pairs that are adjacent on the same sequence.
+- **PD, proximal:** remaining pairs 1 to 9 genes apart on the same sequence.
+- **DD, dispersed:** all other pairs.
+- **Ks:** pairwise codon alignments, MYN model (KaKs_Calculator via MSA2dist).
+
+Pairs with Ks < 0.05 or no estimable Ks (mostly identical sequences) are kept
+apart as *near-identical*: they are very recent duplicates or duplicated
+stretches of an assembly. Each duplicated gene was given one mode, in the
+order SD > TD > PD > DD (`r fig("landscape")`).
+
+```{r gene-modes}
+gpairs <- rbind(pairs[, .(genome, gene = dup1, type, near_ident)],
+                pairs[, .(genome, gene = dup2, type, near_ident)])
+gpairs[, mode := fifelse(near_ident, "Near-identical", type)]
+gpairs[, rank := match(mode, mode_levels)]
+gmode <- gpairs[, .(mode = mode[which.min(rank)]), by = .(genome, gene)]
+land <- gmode[, .N, by = .(genome, mode)]
+land <- merge(land, gen[, .(genome, genes, order)], by = "genome")
+land[, pct := 100 * N / genes]
+land_wide <- dcast(land, genome + order + genes ~ mode, value.var = "pct", fill = 0)
+for (m in mode_levels) if (!m %in% names(land_wide)) land_wide[, (m) := 0]
+land_wide[, dup_pct := SD + TD + PD + DD]
+```
+
+```{r landscape-fig, fig.width = 10, fig.height = 10, fig.cap = cap("landscape", "Duplicated genes per genome on the dated species tree. Middle: percentage of genes in each duplication mode (each gene counted once, priority SD > TD > PD > DD; near-identical only for genes in no older pair). Right: number of protein-coding genes. Tip colour: order.")}
+tip_df <- data.frame(label = gen$genome, order = gen$order)
+p_tree <- ggtree(tree) %<+% tip_df +
+  geom_tippoint(aes(colour = order), size = 1.8) +
+  scale_colour_manual(values = order_cols, name = NULL) +
+  theme(legend.position = "bottom")
+p_modes <- ggplot(land[, .(genome, mode = factor(mode, rev(mode_levels)), pct)],
+                  aes(pct, genome, fill = mode)) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(values = mode_cols, labels = mode_labs, name = NULL, breaks = mode_levels) +
+  labs(x = "Genes (%)", y = NULL) +
+  theme(legend.position = "bottom", axis.text.y = element_text(size = 7)) +
+  guides(fill = guide_legend(nrow = 2))
+p_genes <- ggplot(gen, aes(genes / 1000, genome, fill = order)) +
+  geom_col(width = 0.8, show.legend = FALSE) +
+  scale_fill_manual(values = order_cols) +
+  labs(x = "Genes (thousands)", y = NULL) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+p_modes %>% insert_left(p_tree, width = 0.5) %>% insert_right(p_genes, width = 0.35)
+```
+
+# Differences across genomes
+
+```{r orders-table}
+ord_tab <- land_wide[, .(genomes = .N,
+                         genes = median(genes),
+                         duplicated = median(dup_pct), SD = median(SD), TD = median(TD),
+                         PD = median(PD), DD = median(DD), near_identical = median(`Near-identical`)),
+                     by = order][order(order)]
+num <- names(ord_tab)[sapply(ord_tab, is.numeric)]
+ord_tab[, (num) := lapply(.SD, round, 1), .SDcols = num]
+knitr::kable(ord_tab, caption = tcap("orders", "Median number of genes and median percentage of genes in each duplication mode, per order."))
+```
+
+```{r genes-dups-fig, fig.width = 9, fig.height = 6, fig.cap = cap("genes_dups", "Duplicated genes (excluding near-identical) against the number of genes, per duplication mode and in total. Each point is a genome.")}
+dup_counts <- dcast(land, genome + order + genes ~ mode, value.var = "N", fill = 0)
+for (m in mode_levels) if (!m %in% names(dup_counts)) dup_counts[, (m) := 0]
+dup_counts[, All := SD + TD + PD + DD]
+dlong <- melt(dup_counts, id.vars = c("genome", "order", "genes"),
+              measure.vars = c("All", "SD", "TD", "PD", "DD"), variable.name = "mode", value.name = "dup_genes")
+dlong[, mode := factor(mode, c("All", "SD", "TD", "PD", "DD"),
+                       c("All modes", mode_labs[c("SD", "TD", "PD", "DD")]))]
+ggplot(dlong, aes(genes / 1000, dup_genes / 1000)) +
+  geom_point(aes(colour = order), size = 1.8) +
+  facet_wrap(~mode, scales = "free_y", nrow = 2) +
+  scale_colour_manual(values = order_cols, name = NULL) +
+  labs(x = "Genes (thousands)", y = "Duplicated genes (thousands)") +
+  theme(legend.position = "bottom")
+```
+
+`r round(min(land_wide$dup_pct))`-`r round(max(land_wide$dup_pct))`% of the
+genes of each genome are in a paralogous pair, most of them dispersed
+(`r tab("orders")`). The total is similar in the three orders, but its make-up
+differs: Mortierellales have more segmental, tandem and proximal duplicates and
+fewer dispersed ones than Mucorales with the same number of genes
+(`r fig("genes_dups")`). Genomes with more genes have more duplicated genes,
+mostly dispersed ones.
+
+# Segmental duplicates are concentrated in a few lineages
+
+```{r sd-contig-fig, fig.width = 7, fig.height = 5, fig.cap = cap("sd_contig", "Segmental duplicate pairs (Ks >= 0.05) per 1,000 genes against the percentage of genes on sequences of at least 1 Mb, where collinear blocks can be detected. Each point is a genome; genomes with more than 20 pairs per 1,000 genes are labelled.")}
+gen[, sd_per_1k := 1000 * sd_old / genes]
+ggplot(gen, aes(100 * on_1mb, sd_per_1k, colour = order)) +
+  geom_point(size = 2.2) +
+  geom_text_repel(data = gen[sd_per_1k > 20], aes(label = genome), size = 3,
+                  show.legend = FALSE, max.overlaps = 30) +
+  scale_colour_manual(values = order_cols, name = NULL) +
+  labs(x = "Genes on sequences >= 1 Mb (%)", y = "SD pairs (Ks >= 0.05) per 1,000 genes")
+```
+
+```{r sd-contig-stats}
+# Well-assembled genomes: at least 75% of genes on sequences >= 1 Mb. (The
+# Umbelopsidales genomes are small, with chromosomes of 1-2 Mb, so a stricter
+# cutoff would exclude all of them.)
+hi_cont <- gen[on_1mb >= 0.75]
+sd_by_order_hi <- hi_cont[, .(n = .N, median_sd_per_1k = median(sd_per_1k)), by = order][order(order)]
+# Share of segmental pairs that are near-identical, per order
+sd_ni_share <- pairs[type == "SD"][gen[, .(genome, order)], on = "genome", nomatch = NULL][
+  , .(share = mean(near_ident)), by = .(genome, order)][, .(median_share = median(share)), by = order]
+```
+
+```{r sd-totals}
+# Segmental (SD) pairs and the genes in them, per order and in total (Table S1)
+sd_genes <- function(d) uniqueN(c(paste(d$genome, d$dup1), paste(d$genome, d$dup2)))
+sd_count <- function(d, genomes) data.table(
+  genomes = length(genomes), with_sd = uniqueN(d$genome),
+  sd_pairs = nrow(d), sd_genes = sd_genes(d),
+  sd_pairs_old = sum(!d$near_ident), sd_genes_old = sd_genes(d[near_ident == FALSE]))
+sd_all <- pairs[type == "SD"][, order := gen$order[match(genome, gen$genome)]]
+sd_s1 <- rbind(
+  rbindlist(lapply(order_levels, function(o)
+    cbind(order = o, sd_count(sd_all[order == o], gen[order == o, genome])))),
+  # gzMucFlav4 alone holds most near-identical pairs (uncollapsed haplotypes)
+  cbind(order = "Mucorales without gzMucFlav4",
+        sd_count(sd_all[order == "Mucorales" & genome != "gzMucFlav4"],
+                 gen[order == "Mucorales" & genome != "gzMucFlav4", genome])),
+  cbind(order = "Total", sd_count(sd_all, gen$genome)))
+sd_tot <- sd_s1[order == "Total"]
+```
+
+In total, doubletrouble found `r fmt_n(sd_tot$sd_pairs)` segmental pairs
+(`r fmt_n(sd_tot$sd_genes)` genes) in `r sd_tot$with_sd` of the
+`r sd_tot$genomes` genomes, `r fmt_n(sd_tot$sd_pairs_old)` pairs
+(`r fmt_n(sd_tot$sd_genes_old)` genes) after excluding near-identical pairs
+(Table S1). Among the `r nrow(hi_cont)` well-assembled genomes (at least 75% of genes on
+sequences of 1 Mb or more), segmental duplicates are common in Mortierellales
+(median `r round(sd_by_order_hi[order == "Mortierellales", median_sd_per_1k], 1)`
+pairs per 1,000 genes) and in *Absidia* and *Rhizopus*, and rare in the other
+Mucorales (`r round(sd_by_order_hi[order == "Mucorales", median_sd_per_1k], 1)`)
+and in Umbelopsidales
+(`r round(sd_by_order_hi[order == "Umbelopsidales", median_sd_per_1k], 1)`;
+`r fig("sd_contig")`). Their scarcity is therefore not an assembly artifact.
+In Mucorales, a median `r pct(sd_ni_share[order == "Mucorales", median_share])`%
+of segmental pairs per genome are near-identical, against
+`r pct(sd_ni_share[order == "Mortierellales", median_share])`% in
+Mortierellales; most extreme is gzMucFlav4, with
+`r gen[genome == "gzMucFlav4", fmt_n(ni_sd)]` near-identical segmental pairs
+that point to duplicated (uncollapsed haplotype) sequences in its assembly.
+
+# Ancestral segmental duplications
+
+## Why collinearity misses old segmental duplicates
+
+A pair is segmental only if it lies in a collinear block of at least five
+pairs in the same order. Gene order within chromosomes is scrambled much faster
+in Mucorales and Umbelopsidales than in Mortierellales (synteny analysis), so
+blocks from old segmental duplications or WGDs break into pieces too short for
+this rule, and their pairs are classified as dispersed even though the
+duplicated regions still share genes. The same ancestral duplication can then
+be segmental in one genome and dispersed in another.
+
+## Duplications on the species tree
+
+Each OrthoFinder gene-tree duplication with at least 50% support (both copies
+retained in at least half of the descendant species) was assigned to the
+species-tree branch on which it happened. Within each descendant genome, the
+pairs of genes across its two copies were matched to the doubletrouble pairs.
+
+```{r s4-nodes}
+fetch(c("data/orthofinder/results/Species_Tree/SpeciesTree_rooted_node_labels.txt",
+        "data/orthofinder/results/Gene_Duplication_Events/Duplications.tsv",
+        "data/orthofinder/results/Orthogroups/Orthogroups.GeneCount.tsv"))
+of_suffix <- "[._](prot|proteins|pep)$"
+of_tree <- read.tree("data/orthofinder/results/Species_Tree/SpeciesTree_rooted_node_labels.txt")
+of_tree$tip.label <- sub(of_suffix, "", of_tree$tip.label)
+nt <- Ntip(of_tree)
+depth <- node.depth.edgelength(tree)
+root_age <- max(depth)
+
+# OrthoFinder nodes within the 61 core genomes, matched to the dated tree by
+# their descendant genomes (nodes where the two topologies differ get no match)
+nodes <- rbindlist(lapply(c(seq_len(nt), nt + seq_len(of_tree$Nnode)), function(i) {
+  tl <- if (i <= nt) of_tree$tip.label[i] else extract.clade(of_tree, i)$tip.label
+  if (!all(tl %in% tree$tip.label)) return(NULL)
+  m <- if (length(tl) == 1) match(tl, tree$tip.label) else getMRCA(tree, tl)
+  if (length(tl) > 1 && !setequal(extract.clade(tree, m)$tip.label, tl)) m <- NA_integer_
+  ords <- unique(as.character(gen$order[match(tl, gen$genome)]))
+  data.table(node = if (i <= nt) tl else of_tree$node.label[i - nt], ntips = length(tl),
+             dt_node = m, clade_order = if (length(ords) == 1) ords else "Several orders")
+}))
+nodes[, brlen := tree$edge.length[match(dt_node, tree$edge[, 2])]]
+nodes[, age_end := root_age - depth[dt_node]]
+nodes[, age_start := age_end + brlen]
+
+dups <- fread("data/orthofinder/results/Gene_Duplication_Events/Duplications.tsv")
+setnames(dups, c("og", "of_node", "gt_node", "support", "dup_type", "genes1", "genes2"))
+dups[, node := sub(of_suffix, "", of_node)]
+sup <- dups[support >= 0.5 & node %in% nodes$node]
+nodes <- merge(nodes, sup[, .(dups = .N, ogs = uniqueN(og), single = mean(table(og) == 1)), by = node],
+               by = "node", all.x = TRUE)
+nodes[is.na(dups), `:=`(dups = 0L, ogs = 0L)]
+nodes[, `:=`(rate = dups / brlen, per_og = dups / ogs)]
+
+key_nodes <- data.table(
+  node = c("N8", "N9", "N12", "N11", "N10", "N40", "N46", "N32"),
+  label = c("Mucoromycota (root)", "Umbelopsidales + Mucorales", "Mucorales", "Umbelopsidales",
+            "Mortierellales", "Absidia (3 species)", "A. cylindrospora + A. repens",
+            "R. oryzae + R. stolonifer"))
+# Internal branches long enough for a rate (very short branches between
+# strains of one species give meaningless rates)
+internal <- nodes[ntips > 1 & !is.na(brlen) & brlen >= 5]
+med_rate <- median(internal$rate)
+internal[, rate_rank := frank(-rate)]
+```
+
+```{r ref-tree}
+# Collapsed clades, defined on the full tree
+grp <- data.table(
+  name = c("Mortierellales", "Umbelopsidales", "Lichtheimia and relatives", "Phycomyces, Radiomyces",
+           "Cunninghamella", "Mucor and relatives", "Rhizopus microsporus"),
+  tips = list(gen[order == "Mortierellales", genome], gen[order == "Umbelopsidales", genome],
+              c("gzLicCory1", "SynRace"), c("PhyBlak1", "RadSpec"), c("CunBert", "gzCunBlak1", "gzCunEchi1"),
+              c("gzMucCirc1", "MycAfri"), c("gzRhiMicr1", "RhiMicr2")),
+  col = c(order_cols[["Mortierellales"]], order_cols[["Umbelopsidales"]], rep(order_cols[["Mucorales"]], 5)))
+grp[, members := lapply(tips, function(tl) extract.clade(tree, getMRCA(tree, tl))$tip.label)]
+grp[, n := lengths(members)]
+# Display tree: two genomes per collapsed clade, one from each side of its root,
+# so every triangle keeps its depth but takes the same space
+rep_tips <- function(tl) {
+  m <- getMRCA(tree, tl)
+  vapply(tree$edge[tree$edge[, 1] == m, 2],
+         function(ch) if (ch <= Ntip(tree)) tree$tip.label[ch] else extract.clade(tree, ch)$tip.label[1], "")
+}
+grp[, reps := lapply(tips, rep_tips)]
+keep <- data.table(genome = c("HalRadi", "gzAbsGlau1", "gzAbsCyli1", "AbsRepe", "ggRhiOryz1", "gzRhiStol1"))
+stree <- keep.tip(tree, c(unlist(grp$reps), keep$genome))
+mrca <- function(tips) getMRCA(stree, intersect(tips, stree$tip.label))
+grp[, node := vapply(reps, mrca, 0L)]
+p0 <- ggtree(stree, ladderize = TRUE)
+d0 <- as.data.table(p0$data)
+grp[, y := vapply(reps, function(tl) mean(d0[label %in% tl, y]), 0)]
+p <- p0
+for (i in seq_len(nrow(grp))) {
+  p <- collapse(p, grp$node[i], mode = "mixed", fill = grp$col[i], colour = grp$col[i], alpha = 0.35)
+}
+keep[, `:=`(y = d0$y[match(genome, d0$label)], species = gen$species[match(genome, gen$genome)])]
+# Base figure shared by the reference tree and the summary: tip names and clade labels
+p_base <- p +
+  geom_tiplab(data = function(d) d[d$label %in% keep$genome, ], aes(label = gen$species[match(label, gen$genome)]),
+              fontface = "italic", size = 3.2, offset = 12) +
+  geom_text(data = grp, aes(x = 1012, y = y, label = sprintf("%s (%d)", name, n)), hjust = 0, size = 3.3,
+            inherit.aes = FALSE) +
+  coord_cartesian(xlim = c(-10, 1330), clip = "off") +
+  theme(plot.margin = margin(5, 5, 5, 5))
+```
+
+The branches discussed below carry the OrthoFinder node labels shown in
+`r fig("ref_tree")`. A duplication "on N12" happened on the branch leading to
+node N12, the Mucorales stem.
+
+```{r ref-tree-fig, fig.width = 11, fig.height = 5.5, fig.cap = cap("ref_tree", "The species tree with the node labels used in this report (OrthoFinder species-tree nodes). Each label sits on the branch that leads to its node, where the duplications assigned to that node happened; N8 is the root. Clades without a labelled branch are collapsed into triangles (number of genomes in brackets). Branch lengths: dated tree, relative time.")}
+ref_desc <- data.table(
+  node = c("N8", "N10", "N9", "N11", "N12", "N40", "N46", "N32"),
+  desc = c("Root of Mucoromycota: before Mortierellales split off",
+           "Mortierellales stem",
+           "Stem of Umbelopsidales + Mucorales",
+           "Umbelopsidales stem",
+           "Mucorales stem",
+           "Absidia stem, before A. glauca split off",
+           "A. cylindrospora + A. repens, after the A. glauca split",
+           "R. oryzae + R. stolonifer, after the split from R. microsporus"))
+kn <- merge(ref_desc, nodes[, .(node, dt_node)], by = "node", sort = FALSE)
+clade_tips <- function(n) if (n <= Ntip(tree)) tree$tip.label[n] else extract.clade(tree, n)$tip.label
+kn[, snode := vapply(dt_node, function(n) mrca(clade_tips(n)), 0L)]
+kn[, `:=`(x = d0$branch[match(snode, d0$node)], y = d0$y[match(snode, d0$node)])]
+kn[node == "N8", x := d0$x[match(snode, d0$node)]]
+p_ref <- p_base +
+  geom_label(data = kn, aes(x, y, label = node), size = 3.1, fontface = "bold", colour = "grey15",
+             fill = "white", label.padding = unit(0.15, "lines"), label.size = 0.3, inherit.aes = FALSE)
+kn[, row := rev(seq_len(.N))]
+p_key <- ggplot(kn) +
+  geom_label(aes(0, row, label = node), size = 3.1, fontface = "bold", colour = "grey15", fill = "white",
+             label.padding = unit(0.15, "lines"), label.size = 0.3) +
+  geom_text(aes(0.09, row, label = desc), hjust = 0, size = 3.2) +
+  scale_x_continuous(limits = c(-0.04, 1)) + scale_y_continuous(limits = c(0.4, nrow(kn) + 0.6)) +
+  theme_void()
+p_ref + p_key + plot_layout(widths = c(1.35, 1))
+```
+
+```{r dup-genes}
+fetch(sprintf("data/genomes/%1$s/%1$s_IDtbl.tsv", gen$genome))
+alias_all <- rbindlist(lapply(gen$genome, function(g) {
+  ids <- fread(sprintf("data/genomes/%1$s/%1$s_IDtbl.tsv", g))
+  unique(rbind(ids[, .(id = proteinID, gene = geneID)], ids[, .(id = rnaID, gene = geneID)],
+               ids[, .(id = geneID, gene = geneID)]))[, genome := g]
+}))
+# OrthoFinder writes genes as "<species>_<FASTA header>", with "." in the
+# species name replaced by "_", separated by ", ". Pieces without a core-genome
+# prefix are outgroup genes or parts of FASTA descriptions that contained ", ".
+prefix <- data.table(genome = gen$genome, prefix = paste0(gsub(".", "_", of_names[gen$genome], fixed = TRUE), "_"))
+sup_int <- sup[node %in% nodes[ntips > 1, node]]
+sup_int[, event := .I]
+gl <- rbind(sup_int[, .(event, node, side = 1L, x = genes1)], sup_int[, .(event, node, side = 2L, x = genes2)])
+gl <- gl[, .(part = unlist(strsplit(x, ", ", fixed = TRUE))), by = .(event, node, side)]
+gl[, genome := NA_character_]
+for (i in seq_len(nrow(prefix))) gl[is.na(genome) & startsWith(part, prefix$prefix[i]), genome := prefix$genome[i]]
+gl <- gl[!is.na(genome)]
+gl[, id := sub(" .*", "", substring(part, nchar(prefix$prefix[match(genome, prefix$genome)]) + 1))]
+gl <- merge(gl, alias_all, by = c("genome", "id"), all.x = TRUE)
+gene_map_rate <- mean(!is.na(gl$gene))
+gl <- gl[!is.na(gene)]
+
+cross <- merge(gl[side == 1, .(event, node, genome, g1 = gene)], gl[side == 2, .(event, genome, g2 = gene)],
+               by = c("event", "genome"), allow.cartesian = TRUE)
+cross[, key := paste(pmin(g1, g2), pmax(g1, g2))]
+cross <- unique(cross, by = c("genome", "key", "node"))
+pair_key <- unique(pairs[, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), type)], by = c("genome", "key"))
+cross <- merge(cross, pair_key, by = c("genome", "key"), all.x = TRUE)
+sd_node <- cross[, .(cross_pairs = .N, classified = sum(!is.na(type)), sd = sum(type == "SD", na.rm = TRUE)), by = node]
+sd_node[, sd_share := sd / classified]
+nodes <- merge(nodes, sd_node, by = "node", all.x = TRUE)
+internal <- merge(internal, sd_node, by = "node", all.x = TRUE)
+```
+
+```{r og-genes}
+fetch("data/orthofinder/results/Orthogroups/Orthogroups.tsv")
+og_tab <- fread("data/orthofinder/results/Orthogroups/Orthogroups.tsv", sep = "\t", quote = "")
+# Genes of each core genome per orthogroup (cells list FASTA headers, ", "-separated)
+og_genes <- rbindlist(lapply(gen$genome, function(g) {
+  cell <- og_tab[[of_names[[g]]]]
+  keep <- cell != ""
+  l <- data.table(og = og_tab$Orthogroup[keep], cell = cell[keep])[
+    , .(id = sub(" .*", "", unlist(strsplit(cell, ", ", fixed = TRUE)))), by = og]
+  a <- alias_all[genome == g]
+  unique(l[id %in% a$id][, .(og, genome = g, gene = a$gene[match(id, a$id)])])
+}))
+og_genes <- merge(og_genes, gmode, by = c("genome", "gene"), all.x = TRUE)
+og_genes[is.na(mode), mode := "Not duplicated"]
+dup_in_og <- mean(paste(gmode$genome, gmode$gene) %in% paste(og_genes$genome, og_genes$gene))
+```
+
+## Neighbourhood synteny
+
+For each paralog pair (A, B), the genes within W genes of A and of B are
+compared, ignoring order and orientation. The support of the pair is the
+number of other gene families with a paralog pair linking A's window to B's
+window. A pair is *neighbourhood-syntenic* if its support reaches k: A and B
+lie in regions that were duplicated together with genes of at least k other
+families (`r fig("nb_scheme")`). Near-identical pairs were excluded, and pairs
+closer than 2W genes on one sequence were not tested. The rate expected by
+chance was measured after shuffling gene order in each genome (3 shuffles).
+The analysis uses W = 10 and k = 2.
+
+```{r nb-scheme-fig, fig.width = 9, fig.height = 5.6, fig.cap = cap("nb_scheme", "The neighbourhood synteny test for one paralog pair (A, B), drawn with a window of W = 4 genes (W = 10 in the analysis). Boxes: genes, coloured by gene family; shaded: the window around A and B. Lines: paralog pairs. A link counts as support if it joins A's window to B's window and belongs to another family than A and B. Top: a collinear block, segmental by doubletrouble's rule and neighbourhood-syntenic. Bottom: the same kind of region after gene order has been scrambled; doubletrouble calls A-B dispersed, but three families still link the two windows, so A-B is neighbourhood-syntenic (k = 2). Links of A's own family and links to genes outside a window are not counted.")}
+W_demo <- 4; ctr <- 8; n_pos <- 15
+p_col <- "Collinear block: segmental in doubletrouble, neighbourhood-syntenic (support = 5 families)"
+p_scr <- "Scrambled block: dispersed in doubletrouble, neighbourhood-syntenic (support = 3 families)"
+row_genes <- function(fams) {
+  f <- rep("Other genes", n_pos)
+  for (p in names(fams)) f[as.integer(p)] <- fams[[p]]
+  f
+}
+sch_genes <- rbind(
+  data.table(panel = p_col, row = "A", pos = 1:n_pos,
+             fam = row_genes(list(`5` = "F1", `6` = "F2", `7` = "F3", `8` = "A/B family", `9` = "F4", `10` = "F5"))),
+  data.table(panel = p_col, row = "B", pos = 1:n_pos,
+             fam = row_genes(list(`5` = "F1", `6` = "F2", `7` = "F3", `8` = "A/B family", `9` = "F4", `10` = "F5"))),
+  data.table(panel = p_scr, row = "A", pos = 1:n_pos,
+             fam = row_genes(list(`5` = "F1", `7` = "F2", `8` = "A/B family", `10` = "F3", `11` = "A/B family", `14` = "F4"))),
+  data.table(panel = p_scr, row = "B", pos = 1:n_pos,
+             fam = row_genes(list(`4` = "F3", `6` = "F1", `8` = "A/B family", `9` = "F4", `11` = "F2", `12` = "A/B family"))))
+sch_links <- rbind(
+  data.table(panel = p_col, from = c(8, 5, 6, 7, 9, 10), to = c(8, 5, 6, 7, 9, 10),
+             kind = c("Focal pair A-B", rep("Supporting link", 5)), fam = c("A/B family", "F1", "F2", "F3", "F4", "F5")),
+  data.table(panel = p_scr, from = c(8, 5, 7, 10, 11, 14), to = c(8, 6, 11, 4, 12, 9),
+             kind = c("Focal pair A-B", rep("Supporting link", 3), "Not counted", "Not counted"),
+             fam = c("A/B family", "F1", "F2", "F3", "A/B family", "F4")))
+sch_links[, link_col := fifelse(kind == "Supporting link", fam, kind)]
+sch_genes[, y := fifelse(row == "A", 1, 0)]
+sch_genes[, label := fifelse(fam == "A/B family" & pos == ctr, row, "")]
+fam_fill <- c("A/B family" = "grey20", F1 = "#0072B2", F2 = "#E69F00", F3 = "#009E73",
+              F4 = "#CC79A7", F5 = "#56B4E9", "Other genes" = "grey88")
+link_cols <- c(fam_fill[c("F1", "F2", "F3", "F4", "F5")], "Focal pair A-B" = "grey20", "Not counted" = "grey60")
+panels <- factor(c(p_col, p_scr), c(p_col, p_scr))
+sch_genes[, panel := factor(panel, levels(panels))]
+sch_links[, panel := factor(panel, levels(panels))]
+win <- CJ(panel = panels, y = c(0, 1))
+notes <- data.table(panel = factor(p_scr, levels(panels)), x = c(12.3, 15.1), y = c(0.42, 0.62),
+                    label = c("own family:\nnot counted", "outside A's\nwindow: not counted"))
+ggplot() +
+  geom_rect(data = win, aes(xmin = ctr - W_demo - 0.5, xmax = ctr + W_demo + 0.5, ymin = y - 0.19, ymax = y + 0.19),
+            fill = "#0072B2", alpha = 0.08) +
+  geom_segment(data = sch_links, aes(x = from, xend = to, y = 0.87, yend = 0.13, colour = link_col,
+                                     linetype = kind == "Not counted", linewidth = kind == "Focal pair A-B")) +
+  geom_tile(data = sch_genes, aes(pos, y, fill = fam), width = 0.78, height = 0.24, colour = "white") +
+  geom_text(data = sch_genes, aes(pos, y, label = label), colour = "white", fontface = "bold", size = 3.6) +
+  geom_text(data = notes, aes(x, y, label = label), size = 2.8, colour = "grey40", hjust = 0, lineheight = 0.9) +
+  geom_text(data = CJ(panel = panels, y = c(1, 0))[, label := fifelse(y == 1, "region of A", "region of B")],
+            aes(x = 0.2, y = y, label = label), hjust = 1, size = 3.2) +
+  geom_text(data = data.table(panel = panels), aes(x = ctr, y = 1.3), label = "window: W genes on each side of A and B",
+            size = 3, colour = "#0072B2") +
+  facet_wrap(~panel, ncol = 1) +
+  scale_fill_manual(values = fam_fill, breaks = names(fam_fill), name = "Gene family") +
+  scale_colour_manual(values = link_cols, guide = "none") +
+  scale_linetype_manual(values = c(`FALSE` = "solid", `TRUE` = "dashed"), guide = "none") +
+  scale_linewidth_manual(values = c(`FALSE` = 0.7, `TRUE` = 1.6), guide = "none") +
+  coord_cartesian(xlim = c(-1.6, 16.6), ylim = c(-0.3, 1.38), clip = "off") +
+  theme_void(base_size = 10) +
+  theme(legend.position = "bottom", strip.text = element_text(size = 9.5, face = "bold", margin = margin(b = 4)),
+        panel.spacing = unit(1.2, "lines"), plot.margin = margin(6, 6, 6, 6)) +
+  guides(fill = guide_legend(nrow = 1))
+```
+
+```{r nbhd-support}
+nb_path <- "data/genome_duplication/neighbourhood_support.tsv.gz"
+nb_k <- c(`10` = 2, `20` = 3, `30` = 4)
+if (!file.exists(nb_path)) {
+  nbhd_support <- function(pp, ord, fam, W) {
+    pp <- merge(pp, ord[, .(a = gene, sa = seq, ra = rank)], by = "a")
+    pp <- merge(pp, ord[, .(b = gene, sb = seq, rb = rank)], by = "b")
+    pp[, `:=`(fam_ab = fam[a], tested = !(sa == sb & abs(ra - rb) <= 2 * W))]
+    links <- rbind(pp[, .(x = a, y = b, sx = sa, rx = ra, sy = sb, ry = rb)],
+                   pp[, .(x = b, y = a, sx = sb, rx = rb, sy = sa, ry = ra)])
+    links[, fam_xy := fam[x]]
+    foc <- pp[tested == TRUE, .(a, b, sa, sb, fam_ab, alo = ra - W, ahi = ra + W, blo = rb - W, bhi = rb + W)]
+    j <- links[foc, on = .(sx == sa, rx >= alo, rx <= ahi, sy == sb, ry >= blo, ry <= bhi),
+               nomatch = NULL, allow.cartesian = TRUE, .(a = i.a, b = i.b, x, y, fam_xy, fam_ab = i.fam_ab)]
+    j <- j[x != a & y != b & x != b & y != a & (is.na(fam_xy) | is.na(fam_ab) | fam_xy != fam_ab)]
+    j[is.na(fam_xy), fam_xy := paste0("gene:", pmin(x, y))]
+    s <- j[, .(support = uniqueN(fam_xy)), by = .(a, b)]
+    out <- merge(pp[tested == TRUE, .(a, b)], s, by = c("a", "b"), all.x = TRUE)
+    out[is.na(support), support := 0L]
+    out
+  }
+  nb <- rbindlist(lapply(gen$genome, function(g) {
+    pp <- pairs[genome == g & !near_ident, .(a = dup1, b = dup2)]
+    ord <- unique(gp[genome == g, .(gene = geneID, seq = seqname, start)], by = "gene")
+    setorder(ord, seq, start)
+    ord[, rank := seq_len(.N), by = seq]
+    fam <- og_genes[genome == g, setNames(og, gene)]
+    rbindlist(lapply(as.numeric(names(nb_k)), function(W) {
+      runs <- list(real = ord)
+      for (s in 1:3) { set.seed(s); o <- copy(ord); o[, gene := sample(gene)]; runs[[paste0("null", s)]] <- o }
+      rbindlist(lapply(names(runs), function(r) nbhd_support(pp, runs[[r]], fam, W)[, `:=`(W = W, run = r)]))
+    }))[, genome := g]
+  }))
+  fwrite(nb, nb_path, sep = "\t")
+}
+nb <- fread(nb_path)
+nb[, `:=`(key = paste(pmin(a, b), pmax(a, b)), pass = support >= nb_k[as.character(W)], is_null = run != "real")]
+nb <- merge(nb, pair_key, by = c("genome", "key"), all.x = TRUE)
+nb <- merge(nb, gen[, .(genome, order)], by = "genome")
+```
+
+```{r nb-calib}
+calib <- nb[, .(chance = 100 * mean(pass[is_null]), real = 100 * mean(pass[!is_null]),
+                SD = 100 * mean(pass[!is_null & type == "SD"]), DD = 100 * mean(pass[!is_null & type == "DD"])),
+            by = .(W, k = nb_k[as.character(W)], order)][order(W, order)]
+calib[, DD_over_chance := DD / chance]
+num <- c("chance", "real", "SD", "DD", "DD_over_chance")
+calib_show <- copy(calib[W == 10])[, (num) := lapply(.SD, function(v) signif(v, 3)), .SDcols = num]
+knitr::kable(calib_show, caption = tcap("nb_calib", "Percentage of tested paralog pairs that are neighbourhood-syntenic, by order (window W = 10, threshold k = 2): in genomes with shuffled gene order (chance), in the real genomes (real), and among doubletrouble's segmental (SD) and dispersed (DD) pairs. DD_over_chance: dispersed pairs passing relative to chance."))
+```
+
+With shuffled gene order only
+`r paste(sprintf("%.2f", range(calib[W == 10, chance])), collapse = "-")`% of
+pairs pass, whereas
+`r paste(round(range(calib[W == 10 & order != "Umbelopsidales", SD])), collapse = "-")`%
+of doubletrouble's segmental pairs in Mortierellales and Mucorales do
+(`r tab("nb_calib")`). Among dispersed pairs,
+`r sprintf("%.1f", calib[W == 10 & order == "Mucorales", DD])`% pass in
+Mucorales and `r sprintf("%.1f", calib[W == 10 & order == "Mortierellales", DD])`%
+in Mortierellales, `r round(calib[W == 10 & order == "Mucorales", DD_over_chance])`
+and `r round(calib[W == 10 & order == "Mortierellales", DD_over_chance])` times
+chance: many dispersed duplicates are eroded segmental duplicates. Wider
+windows (W = 20, k = 3; W = 30, k = 4) give the same conclusions.
+
+## Ancestral segmental duplications (ancestral-SD)
+
+A gene-tree duplication is *ancestral-SD* if, in at least two descendant
+genomes, one of its pairs is segmental or neighbourhood-syntenic (in both
+tests excluding near-identical pairs). All its pairs, in every descendant
+genome, are then counted as ancestral-SD, including those that are dispersed
+today: the duplication arose in a block. Requiring two genomes keeps chance
+classifications rare. Figure S1 shows each step with its counts.
+
+```{r nb-nodes}
+nbx <- merge(cross[, .(genome, key, node, event)], nb[, .(genome, key, W, run, is_null, pass)],
+             by = c("genome", "key"))
+nb_node <- nbx[, .(tested = sum(!is_null) / 1, real = 100 * mean(pass[!is_null]), chance = 100 * mean(pass[is_null])),
+               by = .(node, W)]
+nb_node[, tested := tested]
+nb_ev <- nbx[W == 10, .(any = any(pass)), by = .(node, event, run)][
+  , .(events = sum(run == "real"), ev_real = 100 * mean(any[run == "real"]), ev_chance = 100 * mean(any[run != "real"])), by = node]
+nb_w <- dcast(nb_node, node ~ W, value.var = c("real", "chance", "tested"))
+nb_w <- merge(nb_w, nb_ev, by = "node")
+nb_w <- merge(nb_w, nodes[, .(node, ntips, clade_order, age_start, age_end)], by = "node")
+```
+
+```{r anc-classify}
+real10 <- nbx[W == 10 & !is_null]
+nb_real10 <- nb[W == 10 & !is_null, .(genome, key, nb_pass = pass)]
+anc <- merge(cross[, .(genome, key, node, event, type)], nb_real10, by = c("genome", "key"), all.x = TRUE)
+pair_ks <- unique(pairs[, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), Ks)], by = c("genome", "key"))
+anc <- merge(anc, pair_ks, by = c("genome", "key"), all.x = TRUE)
+# segmental pairs count only if not near-identical, as in the neighbourhood test
+anc[, syn := (type %in% "SD" & !is.na(Ks) & Ks >= 0.05) | (!is.na(nb_pass) & nb_pass)]
+anc <- merge(anc, anc[, .(syn_genomes = uniqueN(genome[syn])), by = event], by = "event")
+anc[, cls := fcase(syn_genomes >= 2, "Ancestral-SD", syn_genomes == 1, "Syntenic in 1 genome",
+                   default = "No synteny")]
+anc[cls == "Ancestral-SD", cls := "ancientSD"]   # internal name used by the shared code below
+ev_cls <- unique(anc[, .(event, node, cls)])
+# chance rate of ancestral-SD: the same rule applied to the shuffled genomes
+ev_null <- nbx[W == 10 & is_null, .(n_genomes = uniqueN(genome[pass])), by = .(node, event, run)]
+```
+
+```{r anc-branches-fig, fig.width = 9, fig.height = 4.5, fig.cap = cap("anc_branches", "Gene-tree duplications on key branches, by synteny class: ancestral-SD (segmental or neighbourhood-syntenic in at least two descendant genomes), syntenic in one genome, or no synteny. Numbers: ancestral-SD duplications and their share. The Absidia and Rhizopus branches carry recent WGDs (Section 5).")}
+bk <- ev_cls[node %in% key_nodes$node, .N, by = .(node, cls)]
+bk <- merge(bk, key_nodes, by = "node")
+bk[, `:=`(lab = factor(paste0(label, " (", node, ")"), rev(paste0(key_nodes$label, " (", key_nodes$node, ")"))),
+          cls = factor(cls, rev(c("ancientSD", "Syntenic in 1 genome", "No synteny")),
+                       rev(c("Ancestral-SD", "Syntenic in 1 genome", "No synteny"))))]
+bk_tot <- bk[, .(total = sum(N), anc = sum(N[cls == "Ancestral-SD"])), by = lab]
+ggplot(bk, aes(N, lab, fill = cls)) +
+  geom_col(width = 0.75) +
+  geom_text(data = bk_tot, aes(x = total, y = lab, label = sprintf("%s (%.0f%%)", fmt_n(anc), 100 * anc / total)),
+            inherit.aes = FALSE, hjust = -0.1, size = 3) +
+  scale_fill_manual(values = c("Ancestral-SD" = accent, "Syntenic in 1 genome" = accent_light, "No synteny" = "grey80"),
+                    breaks = c("Ancestral-SD", "Syntenic in 1 genome", "No synteny"), name = NULL) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.18))) +
+  labs(x = "Gene-tree duplications (at least 50% support)", y = NULL) +
+  theme(legend.position = "bottom")
+```
+
+```{r anc-counts}
+stems <- key_nodes[, .(node, stem = paste0(label, " (", node, ")"))]
+ac <- anc[node %in% stems$node]
+ac_ev <- unique(ac[, .(node, event, cls)])[, .(duplications = .N, ancientSD = sum(cls == "ancientSD")), by = node]
+ac_sd <- ac[cls == "ancientSD"]
+ac_genes <- ac_sd[, .(genes = uniqueN(c(paste(genome, sub(" .*", "", key)), paste(genome, sub(".* ", "", key)))),
+                      genomes = uniqueN(genome), pairs = .N, classified = sum(!is.na(type)),
+                      SD = sum(type %in% "SD"), TD = sum(type %in% "TD"), PD = sum(type %in% "PD"),
+                      DD = sum(type %in% "DD")), by = node]
+anc_counts <- merge(stems, merge(ac_ev, ac_genes, by = "node"), by = "node", sort = FALSE)
+anc_counts[, chance := vapply(node, function(nd) 100 * ev_null[node == nd, mean(n_genomes >= 2)], 0)]
+anc_counts_show <- anc_counts[, .(
+  branch = stem, `supported duplications` = fmt_n(duplications),
+  `ancestral-SD duplications` = sprintf("%s (%.0f%%)", fmt_n(ancientSD), 100 * ancientSD / duplications),
+  `chance (%)` = sprintf("%.1f", chance),
+  `descendant genes` = sprintf("%s (%d genomes)", fmt_n(genes), genomes),
+  `copy pairs` = fmt_n(pairs), classified = fmt_n(classified),
+  SD = sprintf("%s (%.0f%%)", fmt_n(SD), 100 * SD / classified),
+  TD = fmt_n(TD), PD = fmt_n(PD),
+  DD = sprintf("%s (%.0f%%)", fmt_n(DD), 100 * DD / classified))]
+knitr::kable(anc_counts_show, caption = tcap("anc_counts", "Ancestral-SD duplications on key branches. Supported duplications: OrthoFinder gene-tree duplications on the branch with at least 50% support. Chance: % of duplications classified ancestral-SD after shuffling gene order. Descendant genes: present-day copies descending from the ancestral-SD duplications, summed over genomes. Copy pairs: pairs of copies from the two sides of each duplication within a genome; classified: pairs that doubletrouble classified (the others were not among either gene's top 5 within-genome DIAMOND hits), with their current mode (% of classified pairs)."))
+```
+
+```{r nb-events-fig, fig.width = 10, fig.height = 5, fig.cap = cap("nb_events", "Mucorales-stem duplications across Mucorales genomes. Left: number of genomes in which a Mucorales-stem duplication has a neighbourhood-syntenic pair, for the real genomes and with shuffled gene order (mean of 3 shuffles); duplications syntenic in no genome are not shown. Right: neighbourhood-syntenic pairs (%) among the Mucorales-stem duplicates in each Mucorales genome, in species-tree order.")}
+ev12 <- nbx[W == 10 & node == "N12", .(n_genomes = uniqueN(genome[pass])), by = .(event, run)]
+ev12[, bin := cut(n_genomes, c(0, 1, 2, 5, 10, 20, Inf), labels = c("1", "2", "3-5", "6-10", "11-20", ">20"))]
+evh <- ev12[n_genomes > 0, .N, by = .(bin, real = run == "real")][, N := ifelse(real, N, N / 3)]
+evh[, set := factor(ifelse(real, "Real genomes", "Shuffled gene order"), c("Real genomes", "Shuffled gene order"))]
+p_ev <- ggplot(evh, aes(bin, N, fill = set)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+  scale_fill_manual(values = c(order_cols[["Mucorales"]], "grey70"), name = NULL) +
+  labs(x = "Genomes in which the duplication is syntenic", y = "N12 duplications") +
+  theme(legend.position = "bottom")
+g12 <- real10[node == "N12", .(pct = 100 * mean(pass), n = .N), by = genome]
+g12[, genome := factor(genome, tip_order)]
+p_g <- ggplot(g12, aes(pct, genome)) +
+  geom_col(fill = order_cols[["Mucorales"]], width = 0.75) +
+  labs(x = "Syntenic N12 pairs (%)", y = NULL) +
+  theme(axis.text.y = element_text(size = 6.5))
+p_ev + p_g + plot_layout(widths = c(1.3, 1))
+```
+
+```{r anc-values}
+ac <- function(nd, col) anc_counts[node == nd][[col]]
+anc_pct <- function(nd) round(100 * ac(nd, "ancientSD") / ac(nd, "duplications"))
+null_anc <- function(nd) 100 * ev_null[node == nd, mean(n_genomes >= 2)]
+top_g <- g12[order(-pct)][1:3]
+gname <- function(g) gen$species[match(g, gen$genome)]
+```
+
+`r fmt_n(ac("N12", "ancientSD"))` of the `r fmt_n(ac("N12", "duplications"))`
+Mucorales-stem duplications (`r anc_pct("N12")`%; `r sprintf("%.1f", null_anc("N12"))`%
+expected with shuffled gene order) and `r fmt_n(ac("N10", "ancientSD"))` of the
+`r fmt_n(ac("N10", "duplications"))` Mortierellales-stem duplications
+(`r anc_pct("N10")`%) are ancestral-SD (`r fig("anc_branches")`,
+`r tab("anc_counts")`). The preceding branch, shared with Umbelopsidales
+(N9), carries fewer duplications although it is longer
+(`r fmt_n(ac("N9", "duplications"))`, of which `r anc_pct("N9")`% ancestral-SD;
+`r sprintf("%.1f", null_anc("N9"))`% expected by chance), and the root of
+Mucoromycota only `r ac("N8", "duplications")`
+(`r ac("N8", "ancientSD")` ancestral-SD).
+The Mucorales-stem ancestral-SD duplications have
+`r fmt_n(ac("N12", "genes"))` descendant genes in `r ac("N12", "genomes")`
+genomes; `r round(100 * ac("N12", "DD") / ac("N12", "classified"))`% of their
+classified pairs are dispersed today, against
+`r round(100 * ac("N10", "DD") / ac("N10", "classified"))`% on the
+Mortierellales stem. The same duplication is often syntenic in some Mucorales
+genomes and dispersed in the rest; synteny survives best in
+`r paste(sprintf("*%s* (%.0f%%)", gname(top_g$genome), top_g$pct), collapse = ", ")`
+(`r fig("nb_events")`).
+
+```{r anc-blocks}
+# Blocks of ancestral-SD duplications. Within a genome, two syntenic copy pairs
+# of ancestral-SD duplications of the same branch belong to one block if both
+# their copies lie within D genes of each other on the same sequences (single
+# linkage). Across genomes, duplications of the same branch are merged into one
+# ancestral block if their pairs share a block in at least m genomes.
+ord_all <- unique(gp[, .(genome, gene = geneID, seq = seqname, start)], by = c("genome", "gene"))
+setorder(ord_all, genome, seq, start)
+ord_all[, rank := seq_len(.N), by = .(genome, seq)]
+bsp <- unique(anc[cls == "ancientSD" & syn == TRUE, .(genome, key, event, node)])
+bsp[, c("g1", "g2") := tstrsplit(key, " ", fixed = TRUE)]
+bsp <- merge(bsp, ord_all[, .(genome, g1 = gene, s1 = seq, r1 = rank)], by = c("genome", "g1"))
+bsp <- merge(bsp, ord_all[, .(genome, g2 = gene, s2 = seq, r2 = rank)], by = c("genome", "g2"))
+bsw <- bsp[, s1 > s2 | (s1 == s2 & r1 > r2)]
+bsp[bsw, c("s1", "r1", "s2", "r2") := .(s2, r2, s1, r1)]
+bsp[, id := .I]
+comp_of <- function(n, e1, e2) igraph::components(igraph::graph_from_edgelist(cbind(c(e1, seq_len(n)), c(e2, seq_len(n))), directed = FALSE))$membership
+anc_blocks <- function(D, m) {
+  q <- bsp[, .(genome, node, s1, s2, i = id, lo1 = r1 - D, hi1 = r1 + D, lo2 = r2 - D, hi2 = r2 + D)]
+  j <- bsp[q, on = .(genome, node, s1, s2, r1 >= lo1, r1 <= hi1, r2 >= lo2, r2 <= hi2),
+           .(i = i.i, j = x.id), allow.cartesian = TRUE, nomatch = NULL][i < j]
+  bk <- copy(bsp)[, block := paste(genome, comp_of(nrow(bsp), j$i, j$j))]
+  eb <- unique(bk[, .(event, node, genome, block)])
+  ee <- eb[eb, on = .(block, node), .(e1 = event, e2 = i.event, genome), allow.cartesian = TRUE, nomatch = NULL][e1 < e2]
+  ee <- ee[, .(n = uniqueN(genome)), by = .(e1, e2)][n >= m]
+  ev <- unique(bk[, .(event, node)])
+  ev[, ab := comp_of(nrow(ev), match(ee$e1, event), match(ee$e2, event))]
+  list(genome_blocks = bk[, .(blocks = uniqueN(block)), by = genome],
+       anc = ev[, .(duplications = .N, blocks = uniqueN(ab), single = sum(table(ab) == 1),
+                    largest = max(table(ab))), by = node])
+}
+blk10 <- anc_blocks(10, 1)
+blk_alt <- list(D20 = anc_blocks(20, 1)$anc, m2 = anc_blocks(10, 2)$anc)
+blk_tab <- merge(key_nodes[, .(node, label)], blk10$anc, by = "node", sort = FALSE)
+blk_tab <- merge(blk_tab, blk_alt$D20[, .(node, blocks_D20 = blocks)], by = "node", sort = FALSE)
+blk_tab <- merge(blk_tab, blk_alt$m2[, .(node, blocks_m2 = blocks)], by = "node", sort = FALSE)
+blk_all <- data.table(node = "", label = "All branches", duplications = sum(blk10$anc$duplications),
+                      blocks = sum(blk10$anc$blocks), single = sum(blk10$anc$single), largest = max(blk10$anc$largest),
+                      blocks_D20 = sum(blk_alt$D20$blocks), blocks_m2 = sum(blk_alt$m2$blocks))
+gb <- merge(blk10$genome_blocks, gen[, .(genome, order = as.character(order))], by = "genome")
+gb_ord <- gb[, .(genomes = .N, blocks = sum(blocks), median = median(blocks)), by = order]
+bt <- function(nd, col) blk_tab[node == nd][[col]]
+```
+
+These duplications fall into far fewer blocks. Grouping duplications of the
+same branch whose syntenic pairs lie within 10 genes of each other in at least
+one genome gives `r fmt_n(blk_all$blocks)` ancestral blocks for the
+`r fmt_n(blk_all$duplications)` ancestral-SD duplications
+(`r fmt_n(min(blk_all$blocks_D20, blk_all$blocks_m2))`-`r fmt_n(max(blk_all$blocks_D20, blk_all$blocks_m2))`
+with a wider distance or when two genomes are required; Table S2). The two stems
+differ: the `r fmt_n(bt("N10", "duplications"))` Mortierellales-stem
+duplications form `r bt("N10", "blocks")` blocks of up to
+`r bt("N10", "largest")` duplications, whereas the
+`r bt("N12", "duplications")` Mucorales-stem duplications form
+`r bt("N12", "blocks")` blocks, `r bt("N12", "single")` of them with a single
+duplication. A duplication stands alone when no other ancestral-SD duplication
+of its branch is kept next to it in any genome, so on old, eroded branches the
+number of blocks is an upper bound on the number of duplicated segments, not a
+count of separate events.
+
+```{r anc-lineage}
+# Ancestral-SD duplications by lineage: the order(s) below the branch each duplication is placed on
+node_ord <- anc[, .(orders = paste(sort(unique(as.character(gen$order[match(genome, gen$genome)]))), collapse = " + ")), by = node]
+lin <- merge(unique(anc[, .(event, node, cls)]), node_ord, by = "node")
+recent_wgd <- c("N40", "N46", "N32")
+lin[, `:=`(lineage = fifelse(grepl("+", orders, fixed = TRUE), "Shared by several orders", orders),
+           branch = fcase(node == "N8", "Root of Mucoromycota (N8)", node == "N9", "Umbelopsidales + Mucorales (N9)",
+                          node %in% c("N12", "N10", "N11"), paste0("Stem (", node, ")"),
+                          node %in% recent_wgd, "Within the order: Absidia and Rhizopus WGD branches (N40, N46, N32)",
+                          orders == "Mucorales", "Within the order: other branches", default = "Within the order"))]
+lin_null <- ev_null[, .(anc = sum(n_genomes >= 2)), by = .(node, run)][, .(chance = mean(anc)), by = node]
+lin <- merge(lin, lin_null, by = "node", all.x = TRUE)
+lin_tot <- lin[cls == "ancientSD", .N]
+lin_br <- lin[, .(duplications = .N, aSD = sum(cls == "ancientSD"),
+                  chance = sum(unique(data.table(node, chance))$chance, na.rm = TRUE)), by = .(lineage, branch)]
+lin_ord <- lin[, .(aSD = sum(cls == "ancientSD")), by = lineage]
+lp <- function(l) sprintf("%.0f%%", 100 * lin_ord[lineage == l, aSD] / lin_tot)
+```
+
+By lineage, `r lp("Mucorales")` of the ancestral-SD duplications lie within
+Mucorales, most of them on the branches of the recent *Absidia* and *Rhizopus*
+WGDs (`r fmt_n(lin_br[grepl("WGD", branch), aSD])`) rather than on the stem
+(`r fmt_n(lin_br[branch == "Stem (N12)", aSD])`); `r lp("Mortierellales")` lie
+within Mortierellales, two thirds of them on its stem;
+`r lp("Umbelopsidales")` within Umbelopsidales; and only
+`r lp("Shared by several orders")` on branches shared by several orders
+(Table S3).
+
+## Which branch? Testing the placement with the gene trees
+
+A gene-tree duplication splits a gene family into two groups of copies, and
+OrthoFinder places it on the species-tree branch where all species with genes
+in the two groups last shared an ancestor. A duplication on the Mucorales stem
+(event 1) leaves Umbelopsidales outside both copy groups. A duplication on the
+branch shared with Umbelopsidales (event 5) puts Umbelopsidales genes in both
+copy groups. A Mucorales-stem duplication can still be placed on event 5 if
+Umbelopsidales lost one copy or if its gene is misplaced in the gene tree: then
+Umbelopsidales appears in only one copy group (`r fig("gt_test")`).
+
+```{r gt-test}
+umb_pre <- paste0(gsub(".", "_", of_names[gen[order == "Umbelopsidales", genome]], fixed = TRUE), "_")
+has_umb <- function(x) vapply(strsplit(x, ", ", fixed = TRUE),
+                              function(v) any(vapply(umb_pre, function(p) any(startsWith(v, p)), FALSE)), FALSE)
+e5 <- sup_int[node == "N9", .(event, s1 = has_umb(genes1), s2 = has_umb(genes2))]
+e5[, umb := fifelse(s1 & s2, "both", fifelse(s1 | s2, "one", "absent"))]
+e5 <- merge(e5, unique(anc[, .(event, cls)]), by = "event", all.x = TRUE)
+e5[is.na(cls), cls := "No synteny"]
+syn_umb <- anc[node == "N9" & syn == TRUE, .(syn_in_umb = any(genome %in% gen[order == "Umbelopsidales", genome])), by = event]
+e5 <- merge(e5, syn_umb, by = "event", all.x = TRUE)
+e5[is.na(syn_in_umb), syn_in_umb := FALSE]
+e5_sum <- e5[, .(events = .N, anc = sum(cls == "ancientSD"), anc_syn_umb = sum(cls == "ancientSD" & syn_in_umb)), by = umb]
+e1 <- data.table(umb = "stem", events = ac("N12", "duplications"), anc = ac("N12", "ancientSD"))
+e5s <- function(u, col) e5_sum[umb == u][[col]]
+```
+
+```{r gt-test-fig, fig.width = 12, fig.height = 7.2, fig.cap = cap("gt_test", "How the gene trees place a duplication, and the test of event 5. Top left: the species tree with the two candidate branches. Top, other panels: cartoon gene trees for one gene family (A, B: the two copies; red square: the duplication) as predicted for a duplication on the Mucorales stem (event 1), for a duplication on the branch shared with Umbelopsidales (event 5), and for a Mucorales-stem duplication that ends up on event 5 because Umbelopsidales lost a copy or its gene is misplaced. Bottom: observed share of ancestral-SD duplications among the event-1 duplications (1), the event-5 duplications with Umbelopsidales in both copy groups (5) and those with Umbelopsidales in only one copy group (5-like).")}
+ord_col3 <- c(Mortierellales = order_cols[["Mortierellales"]], Umbelopsidales = order_cols[["Umbelopsidales"]],
+              Mucorales = order_cols[["Mucorales"]])
+cartoon <- function(nwk, dup_tips = NULL, title, pred, events = NULL) {
+  tr <- read.tree(text = nwk)
+  tr$tip.label <- gsub("_", " ", tr$tip.label)
+  tips <- data.frame(label = tr$tip.label,
+                     ord = sub(" .*", "", tr$tip.label))
+  p <- ggtree(tr, branch.length = "none", linewidth = 0.7) %<+% tips
+  d <- p$data
+  p <- p + geom_tiplab(aes(colour = ord), offset = 0.15, size = 3.3, fontface = "bold") +
+    geom_tippoint(aes(colour = ord), size = 2.2) +
+    scale_colour_manual(values = ord_col3, guide = "none") +
+    labs(title = title, subtitle = pred) +
+    coord_cartesian(xlim = c(0, max(d$x) + 3.2), clip = "off") +
+    theme(plot.title = element_text(size = 10.5, face = "bold"),
+          plot.subtitle = element_text(size = 9, colour = "grey30", lineheight = 1.05),
+          plot.margin = margin(4, 8, 4, 4))
+  if (!is.null(dup_tips)) {
+    dn <- getMRCA(tr, gsub("_", " ", dup_tips))
+    p <- p + geom_point(data = d[d$node == dn, ], aes(x, y), shape = 22, size = 4.5, fill = accent, colour = "white")
+  }
+  if (!is.null(events)) {
+    ev_d <- merge(d, events, by = "label")
+    p <- p + geom_point(data = ev_d, aes(branch, y), shape = 21, size = 6.5, fill = accent, colour = accent) +
+      geom_text(data = ev_d, aes(branch, y, label = id), colour = "white", fontface = "bold", size = 3.3)
+  }
+  p
+}
+sp_tr <- "(Mortierellales,(Umbelopsidales,Mucorales));"
+p_sp <- cartoon(sp_tr, title = "A. Species tree", pred = "Candidate branches:\n1 Mucorales stem\n5 shared with Umbelopsidales")
+sp_d <- p_sp$data
+umbmuc <- sp_d[sp_d$node == getMRCA(read.tree(text = sp_tr), c("Umbelopsidales", "Mucorales")), ]
+p_sp <- p_sp +
+  geom_point(data = umbmuc, aes(branch, y), shape = 21, size = 6.5, fill = "white", colour = accent, stroke = 1) +
+  geom_text(data = umbmuc, aes(branch, y), label = "5", colour = accent, fontface = "bold", size = 3.3) +
+  geom_point(data = sp_d[sp_d$label %in% "Mucorales", ], aes(branch, y), shape = 21, size = 6.5, fill = accent, colour = accent) +
+  geom_text(data = sp_d[sp_d$label %in% "Mucorales", ], aes(branch, y), label = "1", colour = "white", fontface = "bold", size = 3.3)
+p_e1 <- cartoon("(Mortierellales,(Umbelopsidales,(Mucorales_A,Mucorales_B)));", c("Mucorales_A", "Mucorales_B"),
+                "B. Duplication on the\nMucorales stem (1)", "Prediction: Umbelopsidales\noutside both copy groups\n")
+p_e5 <- cartoon("(Mortierellales,((Umbelopsidales_A,Mucorales_A),(Umbelopsidales_B,Mucorales_B)));",
+                c("Umbelopsidales_A", "Mucorales_A", "Umbelopsidales_B", "Mucorales_B"),
+                "C. Duplication shared with\nUmbelopsidales (5)", "Prediction: Umbelopsidales\nin both copy groups\n")
+p_mis <- cartoon("(Mortierellales,((Umbelopsidales,Mucorales_A),Mucorales_B));",
+                 c("Umbelopsidales", "Mucorales_A", "Mucorales_B"),
+                 "D. Mucorales-stem duplication\nthat looks like 5 (5-like)", "Umbelopsidales lost a copy or\nits gene is misplaced: Umbelopsidales\nin one copy group only")
+obs <- rbind(
+  data.table(group = "1", events = e1$events, anc = e1$anc),
+  data.table(group = "5", events = e5s("both", "events"), anc = e5s("both", "anc")),
+  data.table(group = "5-like", events = e5s("one", "events"), anc = e5s("one", "anc")))
+obs[, `:=`(pct = 100 * anc / events, group = factor(group, rev(group)))]
+p_obs <- ggplot(obs, aes(pct, group)) +
+  geom_col(fill = accent, width = 0.6) +
+  geom_text(aes(label = sprintf("%s of %s duplications (%.0f%%)", fmt_n(anc), fmt_n(events), pct)),
+            hjust = -0.05, size = 3.3) +
+  scale_x_continuous(limits = c(0, 62), expand = c(0, 0)) +
+  labs(x = "Ancestral-SD duplications (%)", y = NULL, title = "E. Observed: share of duplications that are ancestral-SD") +
+  theme(axis.text.y = element_text(size = 11, face = "bold")) +
+  theme(plot.title = element_text(size = 10.5, face = "bold"), panel.grid.major.y = element_blank())
+(p_sp | p_e1 | p_e5 | p_mis) / p_obs + plot_layout(heights = c(1.5, 1))
+```
+
+`r fmt_n(e5s("both", "events"))` of the `r fmt_n(sum(e5_sum$events))`
+duplications placed on event 5 have Umbelopsidales genes in both copy groups
+and are therefore shared with Umbelopsidales;
+`r fmt_n(e5s("both", "anc"))` of them
+(`r round(100 * e5s("both", "anc") / e5s("both", "events"))`%) are ancestral-SD,
+`r e5s("both", "anc_syn_umb")` with synteny in Umbelopsidales genomes. The other
+`r fmt_n(e5s("one", "events"))` have Umbelopsidales in only one copy group, and
+`r fmt_n(e5s("one", "anc"))` of them
+(`r round(100 * e5s("one", "anc") / e5s("one", "events"))`%) are ancestral-SD,
+`r if (e5s("one", "anc_syn_umb") == 0) "all syntenic only in Mucorales genomes" else sprintf("%d of them with synteny in Umbelopsidales genomes", e5s("one", "anc_syn_umb"))`: the same share as on the Mucorales
+stem (`r anc_pct("N12")`%), so these are most likely Mucorales-stem block
+duplications placed one branch too deep. The block signal shared with
+Umbelopsidales is thus about half as strong per duplication as that of the
+Mucorales stem.
+
+# Ks of segmental and ancestral-segmental duplicates
+
+Ks grows with the age of a duplicate pair until it saturates at about 2. A
+large-scale duplication leaves many pairs of the same age, a peak in the Ks
+distribution, as long as it is younger than saturation.
+
+```{r ks-data}
+ksd <- pairs[!near_ident & Ks <= 5]
+ksd[, class := fifelse(type == "SD", "Segmental (SD)", "Small-scale (TD, PD, DD)")]
+ksd <- merge(ksd, gen[, .(genome, genes, order)], by = "genome")
+```
+
+
+Peaks were fitted with Gaussian mixture models on log Ks (Ks 0.05-5, 1-4
+components chosen by BIC) for genomes with at least 100 segmental pairs, so
+that the saturated pairs form their own component (`r tab("peaks")`). To
+see how far back Ks carries age information, Ks was computed in the same way
+for 400 random one-to-one orthologs of species pairs with splits of different
+ages on the dated tree (`r tab("orthks")`, `r fig("ks_ridges")`B). It is not used to place events on branches: near saturation, the
+small differences between paralog and ortholog Ks cannot order a duplication
+and a speciation, and the branch of each event comes from the gene trees and
+shared synteny.
+
+```{r ks-peaks}
+fit_peaks <- function(ks) {
+  m <- densityMclust(log(ks), G = 1:4, modelNames = "V", verbose = FALSE, plot = FALSE)
+  o <- order(m$parameters$mean)
+  data.table(component = seq_along(o), mean_log = m$parameters$mean[o],
+             sd_log = sqrt(m$parameters$variance$sigmasq[o]), weight = m$parameters$pro[o])
+}
+sd_n <- ksd[class == "Segmental (SD)", .N, by = genome]
+peak_genomes <- intersect(tip_order, sd_n[N >= 100, genome])
+peaks <- rbindlist(lapply(peak_genomes, function(g) {
+  fit_peaks(ksd[genome == g & class == "Segmental (SD)", Ks])[, genome := g]
+}))
+peaks[, Ks := exp(mean_log)]
+# The main sub-saturation peak: the largest component with mean Ks < 2
+main_peak <- peaks[Ks < 2][order(-weight)][, .SD[1], by = genome]
+peak_tab <- peaks[, .(components = paste(sprintf("%.2f (%.0f%%)", Ks, 100 * weight), collapse = ", ")),
+                  by = genome]
+peak_tab <- merge(peak_tab, sd_n, by = "genome")
+peak_tab <- merge(peak_tab, main_peak[, .(genome, main_Ks = round(Ks, 2), main_weight = round(weight, 2))],
+                  by = "genome", all.x = TRUE)
+peak_tab <- merge(gen[, .(genome, order)], peak_tab, by = "genome")[order(order, -main_weight)]
+knitr::kable(peak_tab[, .(genome, order, SD_pairs = N, components, main_Ks, main_weight)],
+             caption = tcap("peaks", "Gaussian mixture components of the log-Ks distribution of segmental pairs (Ks 0.05-5): component mean Ks and weight. main_Ks and main_weight: the largest component with mean Ks < 2."))
+```
+
+```{r ortholog-ks}
+orth_pairs <- data.table(
+  a = c("gzAbsCyli1", "AbsRepe", "AbsRepe", "ggRhiOryz1", "ggRhiOryz1", "AbsRepe",
+        "ggMorZona1", "ggRhiOryz1", "ggRhiOryz1",
+        "ggMorZona1", "ggMorZona1", "ggMorZona1", "gzMorAlpi1", "ggMorZona1",
+        "gzMucCirc1", "gzMucCirc1", "gzMucCirc1",
+        # splits at ages 70-190, to fill the gap in Ks against split age
+        "gzMucFrag1", "UmbIsab2", "EntParv", "gzMucFrag1", "LicRamo", "gzCunBlak1",
+        "gzMucFrag1", "gzMucFlav2"),
+  b = c("AbsRepe", "gzAbsGlau1", "HalRadi", "gzRhiStol1", "gzRhiMicr1", "ggRhiOryz1",
+        "gzPodHuml1", "gzUmbVina1", "ggMorZona1",
+        "gzLinHyal1", "LinElon", "LinSchm", "gzDisGlob2", "gzMorAlpi1",
+        "gzMucHiem1", "BenPoit", "ggRhiOryz1",
+        "MucVelu", "gzUmbIsab1", "EntParv2", "gzMucCirc1", "gzLicCory1", "gzCunEchi1",
+        "gzMucPlum1", "MucPiri"),
+  split = c("Within Absidia (A. cylindrospora / A. repens)", "Within Absidia (A. repens / A. glauca)",
+            "Absidia / Halteromyces", "Within Rhizopus (R. oryzae / R. stolonifer)",
+            "Within Rhizopus (R. oryzae / R. microsporus)", "Absidia / Rhizopus",
+            "Mortierellales crown", "Mucorales / Umbelopsidales", "Mucorales / Mortierellales",
+            "Within Mortierellales (M. zonata / L. hyalina)", "Within Mortierellales (M. zonata / L. elongata)",
+            "Within Mortierellales (M. zonata / L. schmuckeri)", "Within Mortierellales (M. alpina / D. globulifera)",
+            "Within Mortierellales (M. zonata / M. alpina)", "Within Mucoraceae (M. circinelloides / M. hiemalis)",
+            "Within Mucoraceae (M. circinelloides / B. poitrasii)", "Mucor / Rhizopus",
+            "Within Mucor (M. fragilis / M. velutinosus)", "Within Umbelopsis (U. isabellina strains)",
+            "Within Mortierellales (E. parvispora strains)", "Within Mucor (M. fragilis / M. circinelloides)",
+            "Within Lichtheimia (L. ramosa / L. corymbifera)", "Within Cunninghamella (C. blakesleeana / C. echinulata)",
+            "Within Mucor (M. fragilis / M. plumbeus)", "Within Mucor (M. flavus / M. piriformis)"))
+# Age of each split on the dated tree (relative time, root = 1,000)
+orth_pairs[, age := round(max(node.depth.edgelength(tree)) -
+                            node.depth.edgelength(tree)[getMRCA(tree, c(a, b))]), by = .(a, b)]
+
+orth_path <- "data/genome_duplication/ortholog_ks.tsv"
+# Computed once per species pair and cached; only pairs missing from the cache are computed
+orth_done <- if (file.exists(orth_path)) unique(fread(orth_path)[, paste(a, b)]) else character()
+orth_todo <- orth_pairs[!paste(a, b) %in% orth_done]
+if (nrow(orth_todo) > 0) {
+  load_cds <- function(g) {
+    f <- sprintf("data/doubletrouble/input_data/%s_data.rds", gen[genome == g, dt_id])
+    fetch(f)
+    cds <- readRDS(f)$cds
+    cds[Biostrings::width(cds) %% 3 == 0]  # as in pairs2kaks()
+  }
+  load_alias <- function(g) {  # any OrthoFinder identifier -> gene ID
+    f <- sprintf("data/genomes/%1$s/%1$s_IDtbl.tsv", g)
+    fetch(f)
+    ids <- fread(f)
+    unique(rbind(ids[, .(id = proteinID, gene = geneID)], ids[, .(id = rnaID, gene = geneID)],
+                 ids[, .(id = geneID, gene = geneID)]))
+  }
+  # OrthoFinder separates genes with ", "; public FASTA headers carry descriptions,
+  # so take the first word of each element that is a known identifier.
+  known_id <- function(cell, known) {
+    vapply(strsplit(cell, ", ", fixed = TRUE), function(p) {
+      w <- sub(" .*", "", p); w <- w[w %in% known]
+      if (length(w) == 1) w else NA_character_
+    }, "")
+  }
+  n_genes_in <- function(cell) lengths(strsplit(cell, ", ", fixed = TRUE))
+  ks_of_pairs <- function(cds_a, cds_b, ga, gb) {
+    seqs <- c(cds_a[ga], cds_b[gb])
+    names(seqs) <- c(paste0("a_", ga), paste0("b_", gb))
+    idx <- lapply(seq_along(ga), function(i) c(i, length(ga) + i))
+    r <- MSA2dist::indices2kaks(cds = seqs, indices = idx, model = "MYN", isMSA = FALSE,
+                                threads = max(1, parallel::detectCores() - 1), verbose = FALSE)
+    as.numeric(ifelse(r$Ks == "NA", NA, r$Ks))
+  }
+  ortholog_ks <- function(a, b, n = 400, seed = 1) {
+    f <- sprintf("data/orthofinder/results/Orthologues/Orthologues_%1$s/%1$s__v__%2$s.tsv",
+                 of_names[[a]], of_names[[b]])
+    fetch(f)
+    o <- fread(f, sep = "\t", header = TRUE, quote = "", col.names = c("og", "a", "b"))
+    alias_a <- load_alias(a); alias_b <- load_alias(b)
+    one <- o[n_genes_in(a) == 1 & n_genes_in(b) == 1]
+    one[, `:=`(gene_a = alias_a$gene[match(known_id(a, alias_a$id), alias_a$id)],
+               gene_b = alias_b$gene[match(known_id(b, alias_b$id), alias_b$id)])]
+    cds_a <- load_cds(a); cds_b <- load_cds(b)
+    one <- one[gene_a %in% names(cds_a) & gene_b %in% names(cds_b)]
+    set.seed(seed)
+    s <- one[sample(.N, min(n, .N))]
+    data.table(a = a, b = b, one_to_one = nrow(one), gene_a = s$gene_a, gene_b = s$gene_b,
+               Ks = ks_of_pairs(cds_a, cds_b, s$gene_a, s$gene_b))
+  }
+  orth_new <- rbindlist(lapply(seq_len(nrow(orth_todo)), function(i) {
+    ortholog_ks(orth_todo$a[i], orth_todo$b[i])
+  }))
+  fwrite(rbind(if (file.exists(orth_path)) fread(orth_path) else NULL, orth_new), orth_path, sep = "\t")
+}
+orth_ks <- fread(orth_path)
+orth_ks <- merge(orth_ks, orth_pairs, by = c("a", "b"))
+orth_sum <- orth_ks[, .(age = age[1], one_to_one = one_to_one[1], sampled = .N,
+                        Ks_q25 = quantile(Ks, 0.25, na.rm = TRUE), Ks_median = median(Ks, na.rm = TRUE),
+                        Ks_q75 = quantile(Ks, 0.75, na.rm = TRUE),
+                        saturated_pct = 100 * mean(Ks > 2, na.rm = TRUE)), by = .(split, a, b)]
+# Peak of each ortholog distribution, fitted as for the paralogs (largest
+# Gaussian component below Ks 3): near saturation the median is pulled up by
+# saturated orthologs, so the peak is the value to compare with paralog peaks
+orth_peak <- orth_ks[!is.na(Ks) & Ks >= 0.05 & Ks <= 5, {
+  pk <- fit_peaks(Ks)[, Ks := exp(mean_log)][Ks < 3][order(-weight)]
+  # reported only if this component holds at least half of the orthologs;
+  # otherwise the distribution is mostly saturated and the peak is not a speciation
+  if (nrow(pk) > 0 && pk$weight[1] >= 0.5) .(Ks_peak = pk$Ks[1], peak_weight = pk$weight[1])
+  else .(Ks_peak = NA_real_, peak_weight = if (nrow(pk) > 0) pk$weight[1] else 0)
+}, by = split]
+orth_sum <- merge(orth_sum, orth_peak, by = "split")
+orth_sum <- orth_sum[match(orth_pairs$split, split)]
+orth_sum[, peak_weight := NULL]
+setcolorder(orth_sum, c("split", "a", "b", "age", "one_to_one", "sampled", "Ks_peak"))
+num <- c("Ks_q25", "Ks_median", "Ks_q75", "saturated_pct", "Ks_peak")
+orth_sum[, (num) := lapply(.SD, round, 2), .SDcols = num]
+local({ op <- options(knitr.kable.NA = ""); on.exit(options(op)); knitr::kable(orth_sum, caption = tcap("orthks", paste0("Ks between one-to-one orthologs of species pairs (400 random orthologs per pair; MYN model, as for the paralogs). age: age of the split on the dated tree (relative time, root = 1,000). Ks_peak: largest Gaussian mixture component below Ks 3, fitted as for the paralogs (", tab("peaks"), "), given only where it holds at least half of the orthologs; empty where the distribution is mostly saturated. one_to_one: number of one-to-one orthologs available. saturated_pct: percentage of orthologs with Ks > 2.")))})
+```
+
+```{r anc-ks-summary}
+nb_real10 <- nb[W == 10 & !is_null, .(genome, key, nb_pass = pass)]
+anc <- merge(cross[, .(genome, key, node, event, type)], nb_real10, by = c("genome", "key"), all.x = TRUE)
+pair_ks <- unique(pairs[, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), Ks)], by = c("genome", "key"))
+anc <- merge(anc, pair_ks, by = c("genome", "key"), all.x = TRUE)
+# segmental pairs count only if not near-identical, as in the neighbourhood test
+anc[, syn := (type %in% "SD" & !is.na(Ks) & Ks >= 0.05) | (!is.na(nb_pass) & nb_pass)]
+anc <- merge(anc, anc[, .(syn_genomes = uniqueN(genome[syn])), by = event], by = "event")
+anc[, cls := fcase(syn_genomes >= 2, "ancientSD", syn_genomes == 1, "Syntenic in 1 genome",
+                   default = "No synteny")]
+anc_nodes <- key_nodes[node != "N8"]
+anc_ev <- unique(anc[, .(event, node, cls)])[node %in% anc_nodes$node,
+  .(events = .N, ancientSD = sum(cls == "ancientSD")), by = node]
+ksw <- anc[node %in% anc_nodes$node & !is.na(Ks) & Ks >= 0.05 & Ks <= 5]
+ksw[, set := fifelse(cls == "ancientSD", "ancientSD", "other")]
+anc_ks <- ksw[, .(pairs = .N, median_Ks = median(Ks), below2 = 100 * mean(Ks < 2),
+                  window = 100 * mean(Ks > 1.5 & Ks < 2.6)), by = .(node, set)]
+anc_ks_w <- dcast(anc_ks, node ~ set, value.var = c("pairs", "median_Ks", "below2", "window"))
+anc_tab <- merge(anc_nodes, merge(anc_ev, anc_ks_w, by = "node"), by = "node", sort = FALSE)
+anc_show <- anc_tab[, .(node, label, events, ancientSD_pct = round(100 * ancientSD / events),
+                        ancientSD_pairs = pairs_ancientSD, median_Ks = round(median_Ks_ancientSD, 2),
+                        Ks_below_2 = round(below2_ancientSD, 1),
+                        Ks_1.5_2.6 = round(window_ancientSD, 1), Ks_1.5_2.6_other = round(window_other, 1))]
+knitr::kable(anc_show, caption = tcap("anc", "Gene-tree duplications that are ancestral-SD (segmental or neighbourhood-syntenic in at least two descendant genomes) on key branches, and the Ks of their duplicate pairs (Ks 0.05-5). Ks_below_2: % of ancestral-SD pairs with Ks < 2; Ks_1.5_2.6: % between Ks 1.5 and 2.6 (the Mortierellales Ks component), for ancestral-SD pairs and for the other pairs of the same branch."))
+```
+
+```{r ks-ridges-fig, fig.width = 11, fig.height = 10.5, fig.cap = cap("ks_ridges", paste0("(A) Ks of block duplicates (segmental by doubletrouble, or ancestral-SD) in genomes with a Ks signal and in reference genomes without one, beside the dated species tree pruned to these genomes. Each ridge is the Ks density between 0 and 3, scaled to its own maximum, with the Ks axis reversed so that older duplicates lie to the left, as in the tree; n (under each name): block duplicate pairs in this range, with the share of the genome's block duplicates beyond Ks 3, where Ks carries no age information. Genomes with fewer than 100 such pairs get no ridge. Shaded: Ks 2-3, where Ks starts to saturate. ", "The ridges show where a genome has a burst of block duplicates and how old it is relative to the other duplicates of the same genome, which share its substitution rate and codon usage. They do not place events on branches of the tree: at these Ks, WGD peaks and the nearest speciations cannot be ordered (", tab("orthks"), "), and the branch of each event comes from the gene trees and shared synteny (", fig("anc_branches"), ", ", fig("gt_test"), "). (B) Where Ks saturates: Ks of one-to-one orthologs against the age of the split on the dated tree (relative time, root = 1,000; log scale) for the species pairs of ", tab("orthks"), ", with the median and interquartile range of 400 orthologs per pair, coloured by the order the pair belongs to. Ks rises with split age, reaches about 2 between ages 120 and 200 depending on the lineage, and levels off near 4 whatever the age, so Ks above about 2-3 (shaded, as in A) carries little or no age information. The dated tree has no Mortierellales splits between ages 90 and 220."))}
+ridge_genomes <- c("gzPodHuml1", "ggMorZona1", "gzMorAlpi1", "gzDisGlob2", "gzUmbVina1",
+                   "gzMucCirc1", "gzRhiMicr1", "gzRhiStol1", "ggRhiOryz1",
+                   "HalRadi", "gzAbsGlau1", "gzAbsCyli1", "AbsRepe")
+rtree <- keep.tip(tree, ridge_genomes)
+rtip <- data.frame(label = ridge_genomes, sp = gen$species[match(ridge_genomes, gen$genome)],
+                   order = gen$order[match(ridge_genomes, gen$genome)])
+p_rt <- ggtree(rtree, ladderize = TRUE) %<+% rtip
+rd <- as.data.table(p_rt$data)[isTip == TRUE, .(genome = label, y)]
+ytop <- max(rd$y) + 1.1
+# Block duplicates: segmental pairs and pairs of ancestral-SD duplications (Ks 0.05-5)
+anc_set <- unique(anc[cls == "ancientSD", paste(genome, key)])
+blk <- pairs[genome %in% ridge_genomes & near_ident == FALSE & !is.na(Ks),
+             .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), type, Ks)]
+blk <- unique(blk[type == "SD" | paste(genome, key) %in% anc_set], by = c("genome", "key"))
+blk_n <- blk[, .(n = sum(Ks <= 3), sat = 100 * mean(Ks > 3)), by = genome]
+blk_n <- merge(data.table(genome = ridge_genomes), blk_n, by = "genome", all.x = TRUE)
+blk_n[is.na(n), `:=`(n = 0L, sat = 0)]
+blk_n <- merge(blk_n, rd, by = "genome")
+min_pairs <- 100
+# Ridge per genome: density of block-duplicate Ks on 0-3, scaled to its own maximum
+rid <- blk[genome %in% blk_n[n >= min_pairs, genome] & Ks <= 3.5, {
+  de <- density(Ks, bw = 0.08, from = 0, to = 3.5, n = 400)
+  .(ks = de$x, dens = de$y)
+}, by = genome][ks <= 3]
+rid[, h := 0.85 * dens / max(dens), by = genome]
+rid <- merge(rid, rd, by = "genome")
+rid[, ymax := y + h]
+p_tree_r <- p_rt +
+  geom_tiplab(aes(label = sp, colour = order), fontface = "italic", size = 3.2, offset = 15, vjust = 0) +
+  geom_text(data = blk_n, aes(x = 1015, y = y - 0.08,
+            label = sprintf("n = %s; %.0f%% above Ks 3", fmt_n(n), sat)), hjust = 0, vjust = 1,
+            size = 2.6, colour = "grey40", inherit.aes = FALSE) +
+  scale_colour_manual(values = order_cols, guide = "none") +
+  coord_cartesian(xlim = c(0, 1550), ylim = c(0.5, ytop), clip = "off")
+p_ridge <- ggplot() +
+  annotate("rect", xmin = 2, xmax = 3, ymin = 0.5, ymax = ytop, fill = "grey92") +
+  annotate("text", x = 2.5, y = ytop - 0.15, label = "saturating", size = 3, colour = "grey40") +
+  geom_hline(data = rd, aes(yintercept = y), colour = "grey75", linewidth = 0.3) +
+  geom_ribbon(data = rid, aes(x = ks, ymin = y, ymax = ymax, group = genome),
+              fill = accent, alpha = 0.5, colour = accent, linewidth = 0.3) +
+  geom_text(data = blk_n[n < min_pairs], aes(x = 1.5, y = y + 0.22,
+            label = "too few block duplicates for a ridge"),
+            size = 2.7, colour = "grey45", fontface = "italic") +
+  scale_x_reverse(breaks = seq(0, 3, 0.5), expand = c(0, 0)) +
+  coord_cartesian(xlim = c(3, 0), ylim = c(0.5, ytop)) +
+  labs(x = "Ks of block duplicates (older on the left)", y = NULL) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), panel.grid = element_blank())
+# Panel B: ortholog Ks against split age, coloured by the order of the pair
+oa <- orth_sum[, .(split, age, Ks_q25, Ks_median, Ks_q75,
+                   oa = as.character(gen$order[match(a, gen$genome)]), ob = as.character(gen$order[match(b, gen$genome)]))]
+oa[, grp := factor(fifelse(oa == ob, oa, "Between orders"),
+                   c("Mortierellales", "Umbelopsidales", "Mucorales", "Between orders"))]
+p_age <- ggplot(oa, aes(age, Ks_median, colour = grp)) +
+  annotate("rect", xmin = 10, xmax = 1500, ymin = 2, ymax = 3, fill = "grey92") +
+  annotate("text", x = 14, y = 2.5, label = "saturating", hjust = 0, size = 3, colour = "grey40") +
+  geom_errorbar(aes(ymin = Ks_q25, ymax = Ks_q75), width = 0.04, linewidth = 0.5) +
+  geom_point(size = 2.4) +
+  scale_x_log10(breaks = c(20, 50, 100, 200, 500, 1000)) +
+  scale_colour_manual(values = c(order_cols[c("Mortierellales", "Umbelopsidales", "Mucorales")], `Between orders` = "grey45"),
+                      name = "Species pair") +
+  coord_cartesian(xlim = c(12, 1200), ylim = c(0, 4.7), expand = FALSE) +
+  labs(x = "Age of the split (relative time, root = 1,000; log scale)", y = "Ks between orthologs\n(median and IQR)",
+       tag = "B") +
+  theme(legend.position = "right", panel.grid.minor = element_blank())
+top <- p_tree_r + labs(tag = "A") + p_ridge + plot_layout(widths = c(1, 1.5))
+wrap_elements(full = top) / (plot_spacer() + p_age + plot_spacer() + plot_layout(widths = c(0.12, 1, 0.12))) +
+  plot_layout(heights = c(7.5, 3))
+```
+
+```{r anc-ks-fig, fig.width = 10, fig.height = 5.5, fig.cap = cap("anc_ks", "Ks distributions (log scale, Ks 0.05-5) of the duplicate pairs of key branches, for ancestral-SD duplications and for the other duplications of the same branch. Dotted line: Ks = 2.")}
+ksw <- merge(ksw, anc_nodes, by = "node")
+ksw[, panel := factor(paste0(node, ": ", label), paste0(anc_nodes$node, ": ", anc_nodes$label))]
+ggplot(ksw, aes(Ks, colour = set)) +
+  geom_density(adjust = 0.8, linewidth = 0.7) +
+  geom_vline(xintercept = 2, linetype = "dotted") +
+  facet_wrap(~panel, ncol = 4, scales = "free_y") +
+  scale_x_log10(breaks = c(0.05, 0.2, 0.5, 1, 2, 5), labels = c(0.05, 0.2, 0.5, 1, 2, 5)) +
+  scale_colour_manual(values = c(ancientSD = accent, other = "grey55"), name = NULL,
+                      labels = c(ancientSD = "Ancestral-SD", other = "Other duplications")) +
+  labs(x = "Ks", y = "Density") +
+  theme(legend.position = "bottom", strip.text = element_text(size = 8))
+```
+
+```{r ks-values}
+mp <- function(g) main_peak[genome == g]
+om <- function(s) orth_sum[split == s, Ks_median]
+op <- function(s) orth_sum[split == s, Ks_peak]
+abs_rhi <- c("gzAbsCyli1", "AbsRepe", "gzAbsGlau1", "ggRhiOryz1")
+mort_mid <- peaks[genome %in% gen[order == "Mortierellales", genome] & Ks > 1.5 & Ks < 3]
+av <- function(nd, col) anc_show[node == nd][[col]]
+deep_sat <- orth_sum[split %in% c("Mucorales / Umbelopsidales", "Mucorales / Mortierellales"), range(Ks_median)]
+gl_pre <- paste0(gsub(".", "_", of_names[["gzAbsGlau1"]], fixed = TRUE), "_")
+has_gla <- function(x) vapply(strsplit(x, ", ", fixed = TRUE), function(v) any(startsWith(v, gl_pre)), FALSE)
+gla_both <- function(nd) round(100 * sup[node == nd, mean(has_gla(genes1) & has_gla(genes2))])
+```
+
+- **Where Ks saturates.** Ortholog Ks rises with split age and then levels
+off (`r fig("ks_ridges")`B). Splits younger than about age 90 (relative time,
+root = 1,000) have median Ks
+`r paste(sprintf("%.2f", orth_sum[age < 90, range(Ks_median)]), collapse = "-")`
+in all three orders, for example
+`r om("Within Mortierellales (M. zonata / L. schmuckeri)")` for the
+Mortierellales split at age 68 and
+`r om("Within Mucor (M. fragilis / M. velutinosus)")` for the *Mucor* split
+at age 71, so synonymous rates are similar for young splits. Older splits
+diverge: the median reaches about 2 at age 122 in *Cunninghamella*
+(`r om("Within Cunninghamella (C. blakesleeana / C. echinulata)")`), but only
+at ages 194-195 in *Absidia* and *Rhizopus*
+(`r om("Within Absidia (A. repens / A. glauca)")` and
+`r om("Within Rhizopus (R. oryzae / R. stolonifer)")`), while a *Mucor* split
+at age 175 is already mostly saturated
+(`r om("Within Mucor (M. flavus / M. piriformis)")`), as are the Mortierellales
+splits at ages 222-238 (the tree has no Mortierellales splits between ages 90
+and 220). Every split from age 280 to the root has a median Ks of
+`r paste(sprintf("%.1f", orth_sum[age >= 280, range(Ks_median)]), collapse = "-")`,
+whatever its age. Ks therefore carries age information up to Ks about 2
+(shaded in `r fig("ks_ridges")`A), but the split age at which that limit is
+reached differs between lineages by more than 1.5-fold, even within Mucorales,
+so Ks values of older events cannot be converted to ages or compared between
+lineages.
+- ***Absidia* and *Rhizopus*.** Their segmental pairs have a main Ks
+  component at `r paste(sprintf("%.2f", range(main_peak[genome %in% abs_rhi, Ks])), collapse = "-")`
+  holding `r paste(pct(range(main_peak[genome %in% abs_rhi, weight])), collapse = "-")`%
+  of the pairs (`r fig("ks_ridges")`, `r tab("peaks")`), and their ancestral-SD
+  duplicates have a median Ks of `r av("N46", "median_Ks")` and
+  `r av("N32", "median_Ks")` (`r fig("anc_ks")`). Both events are younger than
+  the split of the two genera (ortholog Ks `r om("Absidia / Rhizopus")`), so
+  they are independent. The gene trees place the *Rhizopus* event before the
+  split of *R. oryzae* and *R. stolonifer*.
+- **Ks cannot order these WGDs and the nearest speciations.** The paralog peaks
+  lie within about 0.3 of the ortholog peaks of the splits from *A. glauca*
+  (`r sprintf("%.2f", op("Within Absidia (A. repens / A. glauca)"))`) and from
+  *R. stolonifer* (`r sprintf("%.2f", op("Within Rhizopus (R. oryzae / R. stolonifer)"))`;
+  `r tab("orthks")`). At Ks near 2 such differences are within the noise,
+  and two effects pull paralog Ks below the true age of a WGD: rediploidization
+  completed only after the speciation in part of the genome (shown for
+  *Absidia*), and the codon-usage bias of retained duplicates, which are often
+  highly expressed. The order therefore comes from the gene trees, which put
+  both WGDs before these splits; Ks shows only that each WGD happened shortly
+  before the speciation. (The median ortholog Ks, `r om("Within Absidia (A. repens / A. glauca)")`
+  and `r om("Within Rhizopus (R. oryzae / R. stolonifer)")`, overstates these
+  splits, because saturated orthologs pull it up.)
+- **One *Absidia* WGD, partly rediploidized after a speciation.** The *Absidia*
+  duplications fall on two branches, before and after *A. glauca* diverged
+  (`r fig("anc_branches")`). *A. glauca* has both copies of
+  `r gla_both("N40")`% of the duplications placed before its split, so these
+  are shared. It lies outside the duplications placed after its split, but in
+  many of these families its own copies form a separate duplication on the
+  *A. glauca* branch, and these pairs are younger (median Ks of ancestral-SD
+  pairs `r av("N46", "median_Ks")` against `r av("N40", "median_Ks")`). This
+  is the pattern of a single WGD whose rediploidization was completed for part
+  of the genome only after the speciation (lineage-specific ohnolog
+  resolution, as after the salmonid WGD), not of a second round; *A. glauca*
+  has also lost more copies or has a less complete annotation (details in the
+  extended report).
+- **Mortierellales.** All `r uniqueN(mort_mid$genome)` Mortierellales genomes
+  have a segmental Ks component at
+  `r paste(sprintf("%.1f", range(mort_mid$Ks)), collapse = "-")`, and the
+  ancestral-SD pairs of the Mortierellales stem are enriched in this range
+  (`r av("N10", "Ks_1.5_2.6")`% between Ks 1.5 and 2.6, against
+  `r av("N10", "Ks_1.5_2.6_other")`% for the other stem duplicates;
+  `r fig("ks_ridges")`A). The gene trees place the event before the
+  Mortierellales crown (age 280), yet this component has a lower Ks than the
+  orthologs of the crown splits, which are mostly saturated
+  (`r fig("ks_ridges")`B): the same discrepancy as for *Absidia* and
+  *Rhizopus*, but larger. Ks therefore cannot date the event or compare it
+  with the Mucorales WGDs. That it still leaves an unsaturated component
+  suggests that it happened late on the long Mortierellales stem, as close to
+  the crown as the gene trees allow, but this is tentative.
+- **Mucorales stem.** Its ancestral-SD pairs are saturated (median Ks
+  `r av("N12", "median_Ks")`; `r av("N12", "Ks_below_2")`% below 2), as is the
+  divergence between the orders (median ortholog Ks
+  `r paste(sprintf("%.1f", deep_sat), collapse = "-")`), so Ks cannot date this
+  event.
+
+# Conclusions {-}
+
+```{r summary-fig, fig.width = 11, fig.height = 6, fig.cap = cap("summary", paste0("Summary of the large-scale duplication events on the dated species tree (relative time, root = 1,000), with the node labels used in the text (", fig("ref_tree"), "). Clades without an event are collapsed into triangles (number of genomes in brackets). Numbered markers sit on the branches where the gene trees place the duplications; filled markers are events with block (ancestral-SD) and Ks evidence, the open marker a weaker block signal. Shaded: the time window in which Ks can still rank events (roughly the last 300 units); events 3 and 4 fall within it, Ks tentatively places event 2 late on the Mortierellales stem (bar; see Section 5), whereas event 1 is beyond it."))}
+ev <- data.table(
+  id = c("1", "2", "3", "4", "5"),
+  node = c(mrca(gen[order == "Mucorales", genome]), mrca(gen[order == "Mortierellales", genome]),
+           mrca(c("AbsRepe", "gzAbsGlau1")),
+           mrca(c("ggRhiOryz1", "gzRhiStol1")), mrca(gen[order != "Mortierellales", genome])),
+  strong = c(TRUE, TRUE, TRUE, TRUE, FALSE))
+ev[, `:=`(x = d0$branch[match(node, d0$node)], y = d0$y[match(node, d0$node)])]
+# Event 2: Ks tentatively places it late on the Mortierellales stem
+mort_crown_x <- d0$x[match(mrca(gen[order == "Mortierellales", genome]), d0$node)]
+ev[id == "2", x := mort_crown_x - 60]
+ev_col <- accent
+datable_age <- 300   # roughly the age up to which Ks ranks events (see Section 5)
+p_tree <- p_base +
+  annotate("segment", x = mort_crown_x - 120, xend = mort_crown_x, y = ev[id == "2", y], yend = ev[id == "2", y],
+           linewidth = 3.5, colour = ev_col, alpha = 0.35) +
+  geom_point(data = ev, aes(x, y, fill = strong), shape = 21, size = 7, colour = ev_col, stroke = 1, inherit.aes = FALSE) +
+  geom_text(data = ev, aes(x, y, label = id, colour = strong), size = 3.6, fontface = "bold", inherit.aes = FALSE) +
+  scale_fill_manual(values = c(`TRUE` = ev_col, `FALSE` = "white"), guide = "none") +
+  scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = ev_col), guide = "none") +
+  scale_x_continuous(breaks = seq(0, 1000, 250), labels = rev(seq(0, 1000, 250))) +
+  labs(x = "Relative time before present (root = 1,000)") +
+  theme(axis.line.x = element_line(colour = "grey40"), axis.ticks.x = element_line(colour = "grey40"),
+        axis.text.x = element_text(size = 9), axis.title.x = element_text(size = 9.5, hjust = 0.3))
+# Shaded window where Ks can still rank events, drawn beneath the tree
+datable <- annotate("rect", xmin = 1000 - datable_age, xmax = 1000, ymin = -Inf, ymax = Inf,
+                    fill = accent, alpha = 0.07)
+p_tree$layers <- c(datable, p_tree$layers)
+p_tree <- p_tree + annotate("text", x = 1000 - datable_age / 2, y = max(d0$y) + 0.9,
+                            label = "Ks-datable", size = 3, colour = accent)
+# Evidence per event
+abs_ks <- main_peak[genome %in% c("gzAbsCyli1", "AbsRepe", "gzAbsGlau1"), median(Ks)]
+rhi_ks <- main_peak[genome == "ggRhiOryz1", Ks]
+ev_txt <- data.table(
+  id = c("1", "2", "3", "4", "5"), strong = c(TRUE, TRUE, TRUE, TRUE, FALSE),
+  title = c("Mucorales stem (N12): ancient large-scale duplication",
+            "Mortierellales stem (N10): large-scale duplication",
+            "Absidia (N40, N46): recent WGD, before the A. glauca split",
+            "R. oryzae + R. stolonifer (N32): recent WGD",
+            "Umbelopsidales + Mucorales stem (N9): weaker block signal"),
+  text = c(sprintf("%s ancestral-SD duplications (%d%%) in %d genomes; blocks eroded (%d%% dispersed today); Ks saturated",
+                   fmt_n(ac("N12", "ancientSD")), anc_pct("N12"), ac("N12", "genomes"),
+                   round(100 * ac("N12", "DD") / ac("N12", "classified"))),
+           sprintf("%s ancestral-SD duplications (%d%%); collinear blocks partly retained; unsaturated Ks component %.1f-%.1f: probably late on the stem",
+                   fmt_n(ac("N10", "ancientSD")), anc_pct("N10"), min(mort_mid$Ks), max(mort_mid$Ks)),
+           sprintf("%s ancestral-SD duplications; Ks peak %.1f; rediploidization partly completed after the A. glauca split (LORe-like)",
+                   fmt_n(ac("N40", "ancientSD") + ac("N46", "ancientSD")), abs_ks),
+           sprintf("%s ancestral-SD duplications; Ks peak %.1f; after the split from R. microsporus",
+                   fmt_n(ac("N32", "ancientSD")), rhi_ks),
+           sprintf("%s ancestral-SD duplications: %s shared with Umbelopsidales (both copies), %s likely Mucorales-stem duplications placed too deep",
+                   fmt_n(ac("N9", "ancientSD")), fmt_n(e5s("both", "anc")), fmt_n(e5s("one", "anc")))))
+ev_txt[, row := rev(seq_len(.N))]
+p_txt <- ggplot(ev_txt) +
+  geom_point(aes(0, row, fill = strong), shape = 21, size = 7, colour = ev_col, stroke = 1) +
+  geom_text(aes(0, row, label = id, colour = strong), size = 3.6, fontface = "bold") +
+  geom_text(aes(0.06, row + 0.14, label = title), hjust = 0, fontface = "bold", size = 3.3) +
+  geom_text(aes(0.06, row - 0.02, label = stringr::str_wrap(text, 62)), hjust = 0, vjust = 1, size = 2.9,
+            lineheight = 0.95, colour = "grey25") +
+  scale_fill_manual(values = c(`TRUE` = ev_col, `FALSE` = "white"), guide = "none") +
+  scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = ev_col), guide = "none") +
+  scale_x_continuous(limits = c(-0.03, 1)) + scale_y_continuous(limits = c(0.2, nrow(ev_txt) + 0.5)) +
+  theme_void()
+p_tree + p_txt + plot_layout(widths = c(1.35, 1))
+```
+
+- **An ancient large-scale duplication shared by all Mucorales.**
+  `r fmt_n(ac("N12", "ancientSD"))` gene-tree duplications on the Mucorales
+  stem arose in duplicated blocks; their copies survive in
+  `r ac("N12", "genomes")` of the 42 Mucorales genomes but are now mostly
+  dispersed, because gene order has been scrambled since. The event is older
+  than Ks can resolve. The signal is concentrated on the Mucorales stem: the
+  branch shared with Umbelopsidales and the root of Mucoromycota carry fewer
+  duplications and a smaller share of ancestral-SD ones, so the event most
+  likely postdates the split from Umbelopsidales. Half of the ancestral-SD
+  duplications on the shared branch look like Mucorales-stem duplications
+  placed one branch too deep; the rest are a weaker block signal shared with
+  Umbelopsidales. This matches, and places more precisely, the WGD
+  proposed by Corrochano et al. (2016).
+- **Lineage-specific large-scale duplications.** Two recent, independent
+  events in *Absidia* and *Rhizopus* (Ks about 1.6-1.9), with many collinear
+  blocks still intact; and an event on the Mortierellales stem
+  (`r fmt_n(ac("N10", "ancientSD"))` ancestral-SD duplications) placed by
+  the gene trees before the Mortierellales crown; its unsaturated Ks component
+  (near 2.4) suggests a late position on the stem, but Ks cannot compare its
+  age with the Mucorales events, because synonymous rates differ between
+  lineages at that depth.
+- **WGD or several segmental duplications.** These analyses show block
+  duplications on each branch but cannot tell a single WGD from several large
+  segmental duplications. A model-based test (Whale) is planned.
+
+# Supplementary tables {-}
+
+```{r table-s1}
+s1 <- sd_s1[, .(order, genomes, `genomes with SD pairs` = with_sd,
+                `SD pairs` = fmt_n(sd_pairs), `genes in SD pairs` = fmt_n(sd_genes),
+                `SD pairs, Ks >= 0.05` = fmt_n(sd_pairs_old), `genes, Ks >= 0.05` = fmt_n(sd_genes_old),
+                `near-identical (%)` = sprintf("%.0f", 100 * (1 - sd_pairs_old / sd_pairs)))]
+knitr::kable(s1, align = c("l", rep("r", 7)),
+  caption = paste("Table S1. Segmental duplicates identified by doubletrouble, per order and in total.",
+                  "SD pairs: anchor pairs of collinear blocks (MCScanX algorithm, at least 5 anchors); each pair is",
+                  "one anchor of a block, so blocks are far fewer. Genes: distinct genes in these pairs. Ks >= 0.05:",
+                  "excluding near-identical pairs (Ks < 0.05 or no estimable Ks), mostly assembly duplicates or very",
+                  "recent copies. near-identical (%): share of SD pairs that are near-identical. Mucorales without gzMucFlav4:",
+                  "the Mucorales genomes except gzMucFlav4 (Mucor flavus), whose assembly contains duplicated",
+                  "(uncollapsed haplotype) sequence and accounts for", fmt_n(sd_all[genome == "gzMucFlav4", sum(near_ident)]),
+                  "of the", fmt_n(sum(sd_all$near_ident)), "near-identical SD pairs; this row is a subset of the Mucorales row",
+                  "and is not part of the total."))
+```
+
+```{r table-s2}
+s2 <- rbind(blk_tab, blk_all)
+knitr::kable(s2[, .(branch = fifelse(node == "", label, paste0(label, " (", node, ")")), `ancestral-SD duplications` = fmt_n(duplications),
+                    blocks = fmt_n(blocks), `single-duplication blocks` = fmt_n(single), `largest block` = largest,
+                    `blocks, D = 20` = fmt_n(blocks_D20), `blocks, 2 genomes` = fmt_n(blocks_m2))],
+  align = c("l", rep("r", 6)),
+  caption = paste("Table S2. Ancestral blocks of the ancestral-SD duplications, on key branches and on all branches together.",
+                  "Within each genome, syntenic copy pairs (segmental or neighbourhood-syntenic) of ancestral-SD duplications of the",
+                  "same branch form one block if both their copies lie within D = 10 genes of each other on the same sequences",
+                  "(single linkage). Duplications of the same branch whose pairs share a block in at least one genome form one",
+                  "ancestral block. largest block: duplications in the largest ancestral block. blocks, D = 20: with a distance of",
+                  "20 genes; blocks, 2 genomes: duplications merged only if they share a block in at least two genomes.",
+                  "Within genomes there are", fmt_n(sum(gb$blocks)), "blocks: median per genome",
+                  paste0(paste(sprintf("%s %s", gb_ord$order, fmt_n(gb_ord$median)), collapse = ", "), "."),
+                  "A duplication with no neighbouring ancestral-SD duplication in any genome forms a block of its own,",
+                  "so block numbers are upper bounds on the number of duplicated segments."))
+```
+
+```{r table-s3}
+lv <- c("Mucorales", "Mortierellales", "Umbelopsidales", "Shared by several orders")
+bv <- c("Stem (N12)", "Stem (N10)", "Stem (N11)", "Within the order: Absidia and Rhizopus WGD branches (N40, N46, N32)",
+        "Within the order: other branches", "Within the order", "Umbelopsidales + Mucorales (N9)", "Root of Mucoromycota (N8)")
+s3 <- copy(lin_br)[order(match(lineage, lv), match(branch, bv))]
+s3_tot <- s3[, .(branch = "Total", duplications = sum(duplications), aSD = sum(aSD), chance = sum(chance)), by = lineage]
+s3 <- rbind(s3, s3_tot)[order(match(lineage, lv), branch == "Total")]
+s3 <- rbind(s3, data.table(lineage = "All", branch = "Total", duplications = sum(lin_br$duplications),
+                           aSD = lin_tot, chance = sum(lin_br$chance)))
+knitr::kable(s3[, .(lineage = fifelse(branch == "Total" | lineage != shift(lineage, fill = ""), lineage, ""),
+                    branch, `supported duplications` = fmt_n(duplications),
+                    `ancestral-SD` = fmt_n(aSD), `% of all ancestral-SD` = sprintf("%.1f", 100 * aSD / lin_tot),
+                    `% of the duplications` = sprintf("%.1f", 100 * aSD / duplications),
+                    `expected by chance` = sprintf("%.1f", chance))],
+  align = c("l", "l", rep("r", 5)),
+  caption = paste("Table S3. Ancestral-SD duplications by lineage: within each order (on its stem or on younger branches)",
+                  "and on branches shared by several orders. Supported duplications: OrthoFinder gene-tree duplications",
+                  "(support at least 0.5) with copy pairs in the 61 genomes. % of the duplications: ancestral-SD share among",
+                  "the supported duplications of these branches. Expected by chance: mean number of ancestral-SD duplications",
+                  "with shuffled gene order (3 runs, neighbourhood test only). Counts are gene-tree duplications, not copy pairs;",
+                  "a duplication on an old branch has copy pairs in many genomes."))
+```
+
+# Supplementary figures {-}
+
+```{r figure-s1, fig.width = 11, fig.height = 10, fig.cap = "**Figure S1.** How gene-tree duplications are classified as ancestral-SD, with the number of duplications or copy pairs at each step (all branches of the species tree). Box colour: where the step comes from (OrthoFinder, doubletrouble, or this study). Copy pairs are counted within genomes, so one duplication contributes pairs in every descendant genome that kept both copies. Near-identical pairs are excluded from both synteny tests. Pairs that are not doubletrouble pairs (not among the top 5 within-genome DIAMOND hits) cannot pass either test but are part of the final dataset when their duplication is ancestral-SD. Expected by chance: mean number of ancestral-SD duplications over 3 runs with shuffled gene order (neighbourhood test only). Percentages in the final box are shares of the ancestral-SD copy pairs by the order of the genome they lie in. MucCirc3 has no copy pairs: its gene identifiers in the OrthoFinder results could not be matched to its annotation."}
+# Counts for each step of the ancestral-SD classification
+fl_pairs <- unique(anc[, .(genome, key, event, type, Ks, nb_pass, syn, cls)])
+fl_pairs[, `:=`(dt_pair = !is.na(type), near = !is.na(type) & (is.na(Ks) | Ks < 0.05))]
+fl_ev <- unique(anc[, .(event, syn_genomes, cls)])
+fl_null <- ev_null[, .(anc = sum(n_genomes >= 2)), by = run][, mean(anc)]
+fl_final <- unique(fl_pairs[cls == "ancientSD", .(genome, key)])[, order := as.character(gen$order[match(genome, gen$genome)])]
+fl <- list(
+  of_all = nrow(dups), of_sup = nrow(sup_int),
+  ev = nrow(fl_ev), pairs = nrow(fl_pairs), pair_genomes = uniqueN(fl_pairs$genome),
+  dt = fl_pairs[, sum(dt_pair)], dt_near = fl_pairs[, sum(near)], not_dt = fl_pairs[, sum(!dt_pair)],
+  sd = fl_pairs[, sum(type %in% "SD" & !near)], nb_tested = fl_pairs[, sum(!is.na(nb_pass))],
+  nb_pass = fl_pairs[, sum(nb_pass %in% TRUE)], both = fl_pairs[, sum(type %in% "SD" & !near & nb_pass %in% TRUE)],
+  syn = fl_pairs[, sum(syn)], syn_genomes = fl_pairs[syn == TRUE, uniqueN(genome)],
+  ev0 = fl_ev[, sum(syn_genomes == 0)], ev1 = fl_ev[, sum(syn_genomes == 1)], ev2 = fl_ev[, sum(syn_genomes >= 2)],
+  final_pairs = nrow(fl_final), final_genomes = uniqueN(fl_final$genome))
+fl_ord <- fl_final[, .N, by = order][order(-N)]
+pc <- function(n, d) sprintf("%s (%.1f%%)", fmt_n(n), 100 * n / d)
+
+src_cols <- c(OrthoFinder = "grey35", doubletrouble = "#1B9E77", "This study" = accent)
+src_fill <- c(OrthoFinder = "grey93", doubletrouble = "#DDF1EB", "This study" = "#EFE6F3")
+bx <- rbindlist(list(
+  list(1, 50, 100, 60, 7, "OrthoFinder gene-tree duplications",
+       sprintf("%s duplications in all gene trees", fmt_n(fl$of_all)), "OrthoFinder"),
+  list(2, 50, 88, 60, 9, "1. Supported duplications on internal branches",
+       sprintf("Support \u2265 0.5 (both copies kept in at least half of the descendant species),\non branches of the 61-genome species tree: %s duplications", fmt_n(fl$of_sup)), "OrthoFinder"),
+  list(3, 50, 75, 60, 9, "2. Copy pairs",
+       sprintf("One copy from each side of a duplication, in the same genome:\n%s copy pairs from %s duplications, in %d genomes",
+               fmt_n(fl$pairs), fmt_n(fl$ev), fl$pair_genomes), "This study"),
+  list(4, 30, 61, 48, 9, "3. Synteny tests, on doubletrouble duplicate pairs",
+       sprintf("Within-genome DIAMOND top-5 hits: %s copy pairs\n%s near-identical (Ks < 0.05 or none): not tested",
+               pc(fl$dt, fl$pairs), fmt_n(fl$dt_near)), "doubletrouble"),
+  list(5, 79, 61, 34, 9, "Not doubletrouble pairs",
+       sprintf("%s copy pairs: no Ks or class,\ncannot pass 3a or 3b; kept in step 5", pc(fl$not_dt, fl$pairs)), "This study"),
+  list(6, 15, 47, 32, 9, "3a. Segmental (SD)",
+       sprintf("Collinear block, \u2265 5 anchors (MCScanX),\nKs \u2265 0.05: %s copy pairs", fmt_n(fl$sd)), "doubletrouble"),
+  list(7, 50, 47, 34, 9, "3b. Neighbourhood-syntenic",
+       sprintf("\u2265 2 other families link the windows of\n10 genes around each copy: %s of %s tested", fmt_n(fl$nb_pass), fmt_n(fl$nb_tested)), "This study"),
+  list(8, 32, 34, 60, 7, "Syntenic copy pairs (3a or 3b)",
+       sprintf("%s copy pairs (%s pass both), in %d genomes", fmt_n(fl$syn), fmt_n(fl$both), fl$syn_genomes), "This study"),
+  list(9, 50, 21, 60, 9, "4. In how many genomes is each duplication syntenic?",
+       "For each duplication: the number of descendant genomes\nwith at least one syntenic copy pair (3a or 3b)", "This study"),
+  list(10, 14, 9, 26, 7, "None", sprintf("%s duplications", pc(fl$ev0, fl$ev)), "This study"),
+  list(11, 42, 9, 26, 7, "One genome", sprintf("%s duplications", pc(fl$ev1, fl$ev)), "This study"),
+  list(12, 76, 9, 38, 7, "Two or more genomes: ancestral-SD",
+       sprintf("%s duplications\n(expected by chance: %s)", pc(fl$ev2, fl$ev), fmt_n(round(fl_null))), "This study"),
+  list(13, 50, -7, 80, 11, "5. Final dataset: ancestral-SD duplications",
+       sprintf("%s gene-tree duplications; all their copy pairs, whatever their class today:\n%s copy pairs in %d genomes\n%s",
+               fmt_n(fl$ev2), fmt_n(fl$final_pairs), fl$final_genomes,
+               paste(sprintf("%s %s", fl_ord$order, pc(fl_ord$N, fl$final_pairs)), collapse = "   ")), "This study")
+))
+setnames(bx, c("id", "x", "y", "w", "h", "title", "body", "src"))
+bx[, src := factor(src, names(src_cols))]
+ar <- data.table(from = c(1, 2, 3, 3, 4, 4, 6, 7, 8, 9, 9, 9, 12),
+                 to   = c(2, 3, 4, 5, 6, 7, 8, 8, 9, 10, 11, 12, 13))
+ar <- cbind(ar, bx[match(ar$from, id), .(x0 = x, y0 = y - h / 2)], bx[match(ar$to, id), .(x1 = x, y1 = y + h / 2)])
+ar[, ym := (y0 + y1) / 2]
+fs <- 3.4
+ggplot() +
+  geom_segment(data = ar, aes(x = x0, xend = x0, y = y0, yend = ym), colour = "grey40") +
+  geom_segment(data = ar, aes(x = x0, xend = x1, y = ym, yend = ym), colour = "grey40") +
+  geom_segment(data = ar, aes(x = x1, xend = x1, y = ym, yend = y1), colour = "grey40",
+               arrow = arrow(length = unit(2, "mm"), type = "closed")) +
+  geom_rect(data = bx, aes(xmin = x - w / 2, xmax = x + w / 2, ymin = y - h / 2, ymax = y + h / 2, fill = src, colour = src),
+            linewidth = ifelse(bx$id == 13, 1.2, 0.5)) +
+  geom_text(data = bx, aes(x, y + h / 2 - 1.2, label = title), fontface = "bold", size = fs, vjust = 1) +
+  geom_text(data = bx, aes(x, y + h / 2 - 3.6, label = body), size = fs * 0.92, vjust = 1, lineheight = 0.95) +
+  scale_fill_manual(values = src_fill, name = "Source of the step", drop = FALSE) +
+  scale_colour_manual(values = src_cols, name = "Source of the step", drop = FALSE) +
+  coord_cartesian(xlim = c(-2, 102), ylim = c(-13.5, 104), expand = FALSE) +
+  theme_void() +
+  theme(legend.position = "bottom", text = element_text(size = 12))
+```
+
+# Session info {-}
+
+```{r session-info}
+sessionInfo()
+```

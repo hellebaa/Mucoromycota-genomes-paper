@@ -11,6 +11,9 @@ Comparative genomics paper on Mucoromycota fungi. Analyses are in Python/R/bash.
   files. It currently downloads from NeLS storage; it will be replaced with a
   Zenodo downloader at publication. Analysis scripts must not reference NeLS directly — always go through
   `scripts/download_files.sh`.
+- `scripts/nels.R` (`nels_ls`, `nels_read`, `nels_file`, `nels_readRDS`) reads
+  NeLS files from R for interactive exploration. Do not use it in pipeline
+  scripts; they fetch inputs through `download_data.sh`.
 
 ## Adding files to an analysis download list
 

@@ -88,7 +88,7 @@ You should land in your NeLS home directory. Exit with `Ctrl-D`.
 
 Each analysis directory under `analysis/` contains a `download_data.sh` script
 that lists the files it needs and delegates to the shared helper
-`scripts/nels_download.sh`.
+`scripts/download_files.sh`.
 
 To download data for, say, the synteny analysis:
 
@@ -99,6 +99,11 @@ bash analysis/synteny/download_data.sh
 Files are written to `data/<analysis>/...` relative to the repository root.
 The `data/` directory is listed in `.gitignore` — data files are never
 committed to the repository.
+
+### Reading files directly from R
+
+`scripts/nels.R` uses the same `nels.storage` host to list, stream and download
+NeLS files from an R session (see the README).
 
 ### Uploading results back to NeLS
 
