@@ -1704,7 +1704,7 @@ p_ev + p_g + plot_layout(widths = c(1.3, 1))
 
 A gene-tree duplication is *ancestrally segmental* (ancientSD) if, in at least
 two descendant genomes, one of its duplicate pairs is segmental (doubletrouble)
-or neighbourhood-syntenic (W = 10, k = 2). All pairs of such a duplication,
+or neighbourhood-syntenic (W = 10, k = 2), near-identical pairs excluded in both. All pairs of such a duplication,
 in every descendant genome, are then counted as ancientSD, including those now
 classified as dispersed: the duplication arose in a block, whatever its state
 today. Requiring two genomes keeps chance passes rare (Section 6.4). Their Ks
@@ -1713,12 +1713,13 @@ distributions show whether these block duplications can be dated.
 ```{r anc-class}
 nb_real10 <- nb[W == 10 & !is_null, .(genome, key, nb_pass = pass)]
 anc <- merge(cross[, .(genome, key, node, event, type)], nb_real10, by = c("genome", "key"), all.x = TRUE)
-anc[, syn := type %in% "SD" | (!is.na(nb_pass) & nb_pass)]
+pair_ks <- unique(pairs[, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), Ks)], by = c("genome", "key"))
+anc <- merge(anc, pair_ks, by = c("genome", "key"), all.x = TRUE)
+# segmental pairs count only if not near-identical, as in the neighbourhood test
+anc[, syn := (type %in% "SD" & !is.na(Ks) & Ks >= 0.05) | (!is.na(nb_pass) & nb_pass)]
 anc <- merge(anc, anc[, .(syn_genomes = uniqueN(genome[syn])), by = event], by = "event")
 anc[, cls := fcase(syn_genomes >= 2, "ancientSD", syn_genomes == 1, "Syntenic in 1 genome",
                    default = "No synteny")]
-pair_ks <- unique(pairs[, .(genome, key = paste(pmin(dup1, dup2), pmax(dup1, dup2)), Ks)], by = c("genome", "key"))
-anc <- merge(anc, pair_ks, by = c("genome", "key"), all.x = TRUE)
 anc_nodes <- key_nodes[node != "N8"]
 anc_ev <- unique(anc[, .(event, node, cls)])[node %in% anc_nodes$node,
   .(events = .N, ancientSD = sum(cls == "ancientSD")), by = node]

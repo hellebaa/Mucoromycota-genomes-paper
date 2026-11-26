@@ -29,4 +29,4 @@ Input files are fetched from NeLS on the first run through
 - `neighbourhood_support.tsv.gz`: neighbourhood synteny support of every paralog pair
 
 R packages: data.table, ape, nlme, ggplot2, ggtree, aplot, ggrepel, mclust,
-patchwork, Biostrings and doubletrouble (for MSA2dist).
+patchwork, igraph, Biostrings and doubletrouble (for MSA2dist).
